@@ -14,6 +14,9 @@ from project_evidence_review_agent.evidence_pack_markdown import (
     render_evidence_pack_markdown,
 )
 from project_evidence_review_agent.missing_evidence import MISSING_EVIDENCE_FILE_NAME
+from project_evidence_review_agent.project_report import (
+    PROJECT_EVIDENCE_REPORT_FILE_NAME,
+)
 from project_evidence_review_agent.retrieval import (
     EVIDENCE_PACK_FILE_NAME,
     RETRIEVAL_TRACE_FILE_NAME,
@@ -116,6 +119,7 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert (output_dir / EVIDENCE_PACK_MARKDOWN_FILE_NAME).exists()
     assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
     assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert not (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
 
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     evidence_index = json.loads(evidence_index_path.read_text(encoding="utf-8"))
@@ -145,8 +149,12 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert trace["go_live_decision_status"] == "not_performed"
     assert trace["missing_evidence_detection_status"] == "skipped_no_llm"
     assert trace["contradiction_detection_status"] == "skipped_no_llm"
-    assert trace["markdown_report_status"] == "not_performed"
-    assert trace["project_evidence_markdown_report_status"] == "not_performed"
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_no_llm"
+    assert trace["markdown_report_status"] == "skipped_no_llm"
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_no_llm"
+    assert trace["project_evidence_markdown_report_status"] == "skipped_no_llm"
     assert trace["max_chunks"] == 10
 
 
@@ -215,7 +223,9 @@ def test_cli_with_sources_writes_readable_evidence_pack_markdown(
     assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["missing_evidence_detection_status"] == "skipped_no_llm"
     assert trace["contradiction_detection_status"] == "skipped_no_llm"
-    assert trace["project_evidence_markdown_report_status"] == "not_performed"
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_no_llm"
+    assert trace["project_evidence_markdown_report_status"] == "skipped_no_llm"
     assert trace["approval_decision_status"] == "not_performed"
 
 

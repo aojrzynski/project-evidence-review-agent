@@ -6,13 +6,13 @@ found, evidence indexing chunks loaded supported sources, and deterministic
 retrieval can select a bounded set of lexical matches for the review question.
 
 This trace now records deterministic evidence-pack work, bounded LLM
-claim-review status, and bounded follow-up analysis for missing evidence and
-contradiction candidates when those optional stages are requested. It still
-records that the final project evidence report and readiness, approval, legal,
-compliance, privacy, security, certification, or go-live verdicts are not
-performed. The project protects
-evidence and authority boundaries by recording what happened, what did not
-happen, and that human review remains the final authority.
+claim-review status, bounded follow-up analysis for missing evidence and
+contradiction candidates, and the final human-readable report when those optional
+stages are requested and validated. It still records that readiness, approval,
+legal, compliance, privacy, security, certification, and go-live verdicts are not
+performed. The project protects evidence and authority boundaries by recording
+what happened, what did not happen, and that human review remains the final
+authority.
 """
 
 from __future__ import annotations
@@ -32,14 +32,15 @@ AUTHORITY_BOUNDARY = (
     "decisions. Human review remains the final authority."
 )
 SCAFFOLD_NOTE = (
-    "PR #7 run: source inventory and evidence indexing may prepare bounded "
+    "PR #8 run: source inventory and evidence indexing may prepare bounded "
     "local chunks, deterministic retrieval may select lexical matches for an "
     "evidence pack, optional bounded LLM claim review may validate cited "
-    "claim output, and follow-up analysis may write validated missing evidence "
-    "and contradiction-candidate artifacts. When sources are not supplied, no "
-    "LLM review was performed. No final project evidence report was written, "
-    "and no project claim or go-live decision was approved. When --no-llm is "
-    "supplied, evidence_pack.md is deterministic review preparation only. When "
+    "claim output, follow-up analysis may write validated missing evidence "
+    "and contradiction-candidate artifacts, and a final human-readable report "
+    "may be assembled after validation. When sources are not supplied, no "
+    "LLM review was performed. No project claim or go-live decision was "
+    "approved. When --no-llm is supplied, evidence_pack.md is deterministic "
+    "review preparation only and no project evidence report is written. When "
     "sources are not supplied, no retrieval is performed."
 )
 
@@ -85,6 +86,15 @@ def build_trace(
     contradiction_validation_status: str = "not_performed",
     contradiction_candidate_count: int = 0,
     rejected_contradiction_count: int = 0,
+    project_evidence_report_written: bool = False,
+    project_evidence_report_path: Path | None = None,
+    project_evidence_report_status: str = "not_requested_or_not_applicable",
+    report_input_artifacts: list[str] | None = None,
+    report_claim_count: int = 0,
+    report_missing_evidence_count: int = 0,
+    report_contradiction_candidate_count: int = 0,
+    report_human_check_count: int = 0,
+    final_report_is_not_approval: bool = True,
 ) -> dict[str, Any]:
     """Build the JSON-serializable trace payload for a retrieval run."""
 
@@ -101,13 +111,14 @@ def build_trace(
         "review_question": question,
         "output_directory": str(output_dir),
         "supplied_sources_path": str(sources_path) if sources_path else None,
-        "workflow_stage": "pr_007_missing_evidence_contradictions",
+        "workflow_stage": "pr_008_project_evidence_report",
         "workflow_status": _workflow_status(
             evidence_pack_markdown_written=evidence_pack_markdown_written,
             llm_review_status=llm_review_status,
             claim_review_validation_status=claim_review_validation_status,
             missing_evidence_validation_status=missing_evidence_validation_status,
             contradiction_validation_status=contradiction_validation_status,
+            project_evidence_report_status=project_evidence_report_status,
         ),
         "artifact": TRACE_FILE_NAME,
         "source_inventory_written": source_inventory_written,
@@ -167,10 +178,21 @@ def build_trace(
         "contradiction_validation_status": contradiction_validation_status,
         "contradiction_candidate_count": contradiction_candidate_count,
         "rejected_contradiction_count": rejected_contradiction_count,
-        "final_project_evidence_report_written": False,
+        "project_evidence_report_written": project_evidence_report_written,
+        "project_evidence_report_path": str(project_evidence_report_path)
+        if project_evidence_report_path
+        else None,
+        "project_evidence_report_status": project_evidence_report_status,
+        "report_input_artifacts": report_input_artifacts or [],
+        "report_claim_count": report_claim_count,
+        "report_missing_evidence_count": report_missing_evidence_count,
+        "report_contradiction_candidate_count": report_contradiction_candidate_count,
+        "report_human_check_count": report_human_check_count,
+        "final_report_is_not_approval": final_report_is_not_approval,
+        "final_project_evidence_report_written": project_evidence_report_written,
         "approval_or_go_live_decision_written": False,
-        "project_evidence_markdown_report_status": "not_performed",
-        "markdown_report_status": "not_performed",
+        "project_evidence_markdown_report_status": project_evidence_report_status,
+        "markdown_report_status": project_evidence_report_status,
         "approval_decision_status": "not_performed",
         "go_live_decision_status": "not_performed",
         "scaffold_note": SCAFFOLD_NOTE,
@@ -219,6 +241,15 @@ def write_trace(
     contradiction_validation_status: str = "not_performed",
     contradiction_candidate_count: int = 0,
     rejected_contradiction_count: int = 0,
+    project_evidence_report_written: bool = False,
+    project_evidence_report_path: Path | None = None,
+    project_evidence_report_status: str = "not_requested_or_not_applicable",
+    report_input_artifacts: list[str] | None = None,
+    report_claim_count: int = 0,
+    report_missing_evidence_count: int = 0,
+    report_contradiction_candidate_count: int = 0,
+    report_human_check_count: int = 0,
+    final_report_is_not_approval: bool = True,
 ) -> Path:
     """Write the trace artifact and return its path."""
 
@@ -265,6 +296,15 @@ def write_trace(
         contradiction_validation_status=contradiction_validation_status,
         contradiction_candidate_count=contradiction_candidate_count,
         rejected_contradiction_count=rejected_contradiction_count,
+        project_evidence_report_written=project_evidence_report_written,
+        project_evidence_report_path=project_evidence_report_path,
+        project_evidence_report_status=project_evidence_report_status,
+        report_input_artifacts=report_input_artifacts,
+        report_claim_count=report_claim_count,
+        report_missing_evidence_count=report_missing_evidence_count,
+        report_contradiction_candidate_count=report_contradiction_candidate_count,
+        report_human_check_count=report_human_check_count,
+        final_report_is_not_approval=final_report_is_not_approval,
     )
     trace_path.write_text(
         json.dumps(trace_payload, indent=2, sort_keys=True) + "\n",
@@ -280,7 +320,10 @@ def _workflow_status(
     claim_review_validation_status: str,
     missing_evidence_validation_status: str = "not_performed",
     contradiction_validation_status: str = "not_performed",
+    project_evidence_report_status: str = "not_requested_or_not_applicable",
 ) -> str:
+    if project_evidence_report_status == "written":
+        return "project_evidence_report_written"
     if (
         claim_review_validation_status == "passed"
         and missing_evidence_validation_status == "passed"

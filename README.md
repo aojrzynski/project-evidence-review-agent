@@ -8,17 +8,18 @@ It does not approve projects, certify readiness, replace governance, or make leg
 
 Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, prepare small source references, and select a bounded set of chunks that match the review question.
 
-The current workflow now has three layers:
+The current workflow now has four layers:
 
 1. **Deterministic evidence-pack building** inspects supplied local sources, inventories them, chunks them, retrieves relevant passages, and writes bounded JSON evidence packs plus readable Markdown views.
 2. **Bounded LLM claim review** asks an LLM to draft structured claim review material from only the selected evidence pack, then validates the returned citations and authority boundary before treating the output as successful.
 3. **Validation-bounded follow-up analysis** uses the same bounded context plus validated claim review to identify missing evidence gaps and contradiction candidates for human review.
+4. **Human-readable report assembly** writes `project_evidence_report.md` from validated artifacts after a successful full run, without making another LLM call or adding a new decision stage.
 
-The LLM is central to the full claim review workflow, but it is not authoritative. The evidence pack controls the input boundary. The validator controls the output boundary.
+The LLM is central to the full claim review workflow, but it is not authoritative. The evidence pack controls the input boundary. The validator controls the output boundary. The final report is an assembly of validated artifacts for a human reviewer.
 
-## Current PR #7 capability
+## Current PR #8 capability
 
-PR #7 provides bounded LLM claim review plus missing evidence and contradiction candidate artifacts while keeping deterministic evidence-pack mode available:
+PR #8 adds the human-readable `project_evidence_report.md` after successful full LLM review while keeping deterministic evidence-pack mode available:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
@@ -45,8 +46,12 @@ PR #7 provides bounded LLM claim review plus missing evidence and contradiction 
 - After successful claim review, writes `contradiction_log.json` with validation-bounded contradiction candidates.
 - Requires contradiction candidates to cite valid evidence IDs on both sides.
 - Allows missing evidence entries to describe gaps where evidence was not found.
-- Continues writing `project_evidence_trace.json` with deterministic, LLM, missing evidence, and contradiction status fields.
-- Records that the final project evidence report and approval decisions are still not performed.
+- Writes `project_evidence_report.md` after claim review, missing evidence, and contradiction validation all pass.
+- Makes `project_evidence_report.md` the first artifact to open after a successful full run.
+- Keeps `evidence_pack.md` as the first artifact to open in `--no-llm` mode.
+- Assembles validated artifacts without making another LLM call.
+- Continues writing `project_evidence_trace.json` with deterministic, LLM, follow-up, and report status fields.
+- Records that approval and go-live decisions are still not performed.
 
 ## Supported source file types
 
@@ -134,6 +139,7 @@ outputs/claim_review_run/llm_safe_review_context.json
 outputs/claim_review_run/claim_review.json
 outputs/claim_review_run/missing_evidence.json
 outputs/claim_review_run/contradiction_log.json
+outputs/claim_review_run/project_evidence_report.md
 outputs/claim_review_run/project_evidence_trace.json
 ```
 
@@ -156,6 +162,9 @@ In deterministic mode, the command does not write:
 - `claim_review.json`
 - `missing_evidence.json`
 - `contradiction_log.json`
+- `project_evidence_report.md`
+
+After a successful full LLM-enabled run, open `project_evidence_report.md` first. It assembles the validated claim review, missing evidence signals, contradiction candidates, selected evidence map, source map, limitations, and recommended human checks. In `--no-llm` mode, open `evidence_pack.md` first because no claim review or report is written.
 
 ## What `claim_review.json` contains
 
@@ -200,6 +209,16 @@ The validator checks model output before it can be treated as a successful claim
 
 Uncited, invented, malformed, or authority-overreaching model output is rejected. A failed validation writes `claim_review.json` with `validation_status = failed`, validator messages, and rejected item summaries. It is safer to preserve a failed validation artifact than to present unsafe output as a successful review.
 
+## What `project_evidence_report.md` contains
+
+`project_evidence_report.md` is the human-readable report for a successful full run. It does not make another LLM call. It does not reinterpret evidence beyond the validated artifacts already written. It separates:
+
+- **Claim review**: bounded claims with statuses, cited evidence IDs, explanations, caveats, and recommended human checks.
+- **Missing evidence signals**: gap signals from the supplied evidence pack. These are not proof that evidence does not exist elsewhere.
+- **Contradiction candidates**: possible tensions between cited evidence chunks. These are not final findings and require human review.
+
+The report also includes a selected evidence map, source map, limitations, an artifact list, and an authority boundary. It is not approval, readiness certification, compliance certification, or go-live approval. Human review remains the final authority.
+
 ## What the trace records
 
 `project_evidence_trace.json` records the deterministic artifact statuses plus LLM and follow-up fields such as:
@@ -225,8 +244,17 @@ Uncited, invented, malformed, or authority-overreaching model output is rejected
 - `contradiction_validation_status`
 - `contradiction_candidate_count`
 - `rejected_contradiction_count`
+- `project_evidence_report_written`
+- `project_evidence_report_path`
+- `project_evidence_report_status`
+- `report_input_artifacts`
+- `report_claim_count`
+- `report_missing_evidence_count`
+- `report_contradiction_candidate_count`
+- `report_human_check_count`
+- `final_report_is_not_approval`
 
-The trace still confirms no final project evidence report and no approval or go-live decision.
+The trace confirms no approval or go-live decision.
 
 ## Safety and authority boundaries
 
@@ -240,8 +268,9 @@ Current and future outputs should preserve these boundaries:
 - Selecting a chunk does not imply that the chunk supports or contradicts the question.
 - The LLM must reason only over bounded supplied evidence.
 - Claims that indicate support must cite evidence IDs.
-- Missing evidence and possible contradictions are current follow-up artifacts and are review prompts, not final verdicts.
-- Claim review is review material, not project approval.
+- Missing evidence and possible contradictions are follow-up artifacts and are review prompts, not final verdicts.
+- The final report is assembled review material, not project approval.
+- The report cannot certify readiness, compliance, privacy, security, legal status, or go-live.
 - Human review remains the final authority.
 
 ## Synthetic local demo material
@@ -319,4 +348,4 @@ Each missing evidence entry uses a deterministic `ME-0001`-style ID, an allowed 
 
 `contradiction_log.json` records contradiction candidates, not final findings. Every candidate uses a deterministic `CON-0001`-style ID and must cite valid `EV-0001`-style evidence IDs on both side A and side B. Source IDs alone are rejected. Invented evidence IDs are rejected.
 
-Both artifacts are produced only after `claim_review.json` passes validation. If follow-up validation fails, failed artifacts preserve validator messages and rejected item summaries instead of pretending the analysis succeeded. The final Markdown report remains future PR #8.
+Both artifacts are produced only after `claim_review.json` passes validation. If follow-up validation fails, failed artifacts preserve validator messages and rejected item summaries instead of pretending the analysis succeeded. The final Markdown report is `project_evidence_report.md` when the full LLM-enabled workflow succeeds. It assembles these validated artifacts and stays non-authoritative.
