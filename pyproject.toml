@@ -18,6 +18,9 @@ dependencies = [
 project-evidence-review = "project_evidence_review_agent.cli:main"
 
 [project.optional-dependencies]
+llm = [
+  "openai>=1.82",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
