@@ -13,12 +13,23 @@ import argparse
 import sys
 from pathlib import Path
 
+from project_evidence_review_agent.claim_review import run_claim_review
 from project_evidence_review_agent.evidence_index import (
     build_evidence_index,
     write_evidence_index,
 )
 from project_evidence_review_agent.evidence_pack_markdown import (
     write_evidence_pack_markdown,
+)
+from project_evidence_review_agent.llm_client import (
+    DEFAULT_LLM_MODEL,
+    LLMConfigurationError,
+    OpenAIReviewClient,
+    ReviewLLMClient,
+)
+from project_evidence_review_agent.llm_context import (
+    build_llm_safe_review_context,
+    write_llm_safe_review_context,
 )
 from project_evidence_review_agent.retrieval import (
     validate_max_chunks,
@@ -82,6 +93,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help=(
+            "Skip LLM claim review and stop after deterministic evidence-pack "
+            "JSON/Markdown artifacts."
+        ),
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=DEFAULT_LLM_MODEL,
+        help=f"LLM model for bounded claim review. Default: {DEFAULT_LLM_MODEL}.",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -89,7 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    review_client: ReviewLLMClient | None = None,
+) -> int:
     """Run the CLI and return a process exit code."""
 
     parser = build_parser()
@@ -117,6 +144,15 @@ def main(argv: list[str] | None = None) -> int:
     selected_evidence_chunk_count = 0
     source_fingerprint_warning_count = 0
     chunking_status = "not_requested"
+    llm_safe_review_context_written = False
+    llm_safe_review_context_path = None
+    claim_review_written = False
+    claim_review_path = None
+    llm_review_status = "not_performed"
+    claim_review_validation_status = "not_performed"
+    claim_count = 0
+    rejected_claim_count = 0
+    validator_message_count = 0
 
     if args.sources is not None:
         try:
@@ -149,6 +185,49 @@ def main(argv: list[str] | None = None) -> int:
                 evidence_pack=retrieval_summary.evidence_pack_payload,
                 output_dir=args.output_dir,
             )
+            if args.no_llm:
+                llm_review_status = "skipped_no_llm"
+            else:
+                llm_safe_context = build_llm_safe_review_context(
+                    retrieval_summary.evidence_pack_payload
+                )
+                llm_safe_review_context_path = write_llm_safe_review_context(
+                    evidence_pack=retrieval_summary.evidence_pack_payload,
+                    output_dir=args.output_dir,
+                )
+                llm_safe_review_context_written = True
+                try:
+                    client = (
+                        review_client
+                        if review_client is not None
+                        else OpenAIReviewClient()
+                    )
+                except LLMConfigurationError as exc:
+                    llm_review_status = "failed"
+                    claim_review_validation_status = "not_validated"
+                    print(
+                        f"error: LLM claim review requested but not configured: {exc} "
+                        "Rerun with --no-llm for deterministic evidence-pack mode.",
+                        file=sys.stderr,
+                    )
+                else:
+                    claim_review_result = run_claim_review(
+                        context=llm_safe_context,
+                        client=client,
+                        model=args.llm_model,
+                        output_dir=args.output_dir,
+                    )
+                    claim_review_written = True
+                    claim_review_path = claim_review_result.path
+                    llm_review_status = claim_review_result.llm_review_status
+                    claim_review_validation_status = (
+                        claim_review_result.validation_status
+                    )
+                    claim_count = claim_review_result.claim_count
+                    rejected_claim_count = claim_review_result.rejected_claim_count
+                    validator_message_count = (
+                        claim_review_result.validator_message_count
+                    )
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -208,6 +287,17 @@ def main(argv: list[str] | None = None) -> int:
             selected_evidence_chunk_count=selected_evidence_chunk_count,
             max_chunks=args.max_chunks,
             source_fingerprint_warning_count=source_fingerprint_warning_count,
+            no_llm=args.no_llm,
+            llm_model=args.llm_model,
+            llm_safe_review_context_written=llm_safe_review_context_written,
+            llm_safe_review_context_path=llm_safe_review_context_path,
+            claim_review_written=claim_review_written,
+            claim_review_path=claim_review_path,
+            llm_review_status=llm_review_status,
+            claim_review_validation_status=claim_review_validation_status,
+            claim_count=claim_count,
+            rejected_claim_count=rejected_claim_count,
+            validator_message_count=validator_message_count,
         )
     except OSError as exc:
         print(
@@ -217,4 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"Wrote project evidence trace: {trace_path}")
+    if args.sources is not None and not args.no_llm and (
+        llm_review_status == "failed" or claim_review_validation_status == "failed"
+    ):
+        return 1
     return 0

@@ -32,6 +32,8 @@ def test_cli_help_works(capsys: pytest.CaptureFixture[str]) -> None:
     assert "--output-dir" in output
     assert "--sources" in output
     assert "--max-chunks" in output
+    assert "--no-llm" in output
+    assert "--llm-model" in output
 
 
 def test_cli_version_works(capsys: pytest.CaptureFixture[str]) -> None:
@@ -93,6 +95,7 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
             str(sources),
             "--question",
             "Is the project ready for go-live?",
+            "--no-llm",
             "--output-dir",
             str(output_dir),
         ]
@@ -133,7 +136,7 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     )
     assert trace["retrieval_status"] == "completed"
     assert trace["evidence_pack_status"] == "completed"
-    assert trace["llm_review_status"] == "not_performed"
+    assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
     assert trace["missing_evidence_detection_status"] == "not_performed"
@@ -160,6 +163,7 @@ def test_cli_with_sources_writes_readable_evidence_pack_markdown(
                 question,
                 "--max-chunks",
                 "4",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -205,7 +209,7 @@ def test_cli_with_sources_writes_readable_evidence_pack_markdown(
 
     assert trace["evidence_pack_markdown_written"] is True
     assert trace["selected_evidence_chunk_count"] == len(selected_chunks)
-    assert trace["llm_review_status"] == "not_performed"
+    assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["missing_evidence_detection_status"] == "not_performed"
     assert trace["contradiction_detection_status"] == "not_performed"
     assert trace["project_evidence_markdown_report_status"] == "not_performed"
@@ -275,6 +279,7 @@ def test_review_question_retrieval_and_evidence_pack_artifacts(tmp_path: Path) -
                 question,
                 "--max-chunks",
                 "3",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -344,6 +349,7 @@ def test_retrieval_is_deterministic_across_repeated_runs(tmp_path: Path) -> None
                 str(sources),
                 "--question",
                 question,
+                "--no-llm",
                 "--output-dir",
                 str(first_output),
             ]
@@ -357,6 +363,7 @@ def test_retrieval_is_deterministic_across_repeated_runs(tmp_path: Path) -> None
                 str(sources),
                 "--question",
                 question,
+                "--no-llm",
                 "--output-dir",
                 str(second_output),
             ]
@@ -390,6 +397,7 @@ def test_source_fingerprints_present_for_loaded_files(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "testing",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -417,6 +425,7 @@ def test_supported_source_types_are_loaded(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -449,6 +458,7 @@ def test_evidence_index_chunks_supported_source_types(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -480,6 +490,7 @@ def test_evidence_ids_are_stable_and_deterministic(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(first_output),
             ]
@@ -493,6 +504,7 @@ def test_evidence_ids_are_stable_and_deterministic(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(second_output),
             ]
@@ -519,6 +531,7 @@ def test_markdown_and_text_chunks_include_line_numbers(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -552,6 +565,7 @@ def test_csv_chunks_include_row_references(tmp_path: Path) -> None:
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -583,6 +597,7 @@ def test_unsupported_file_extension_is_skipped_with_reason(tmp_path: Path) -> No
                 str(sources),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
@@ -607,7 +622,15 @@ def test_missing_sources_path_gives_clean_nonzero_error(
     missing = tmp_path / "missing"
 
     exit_code = main(
-        ["--sources", str(missing), "--question", "Q", "--output-dir", str(output_dir)]
+        [
+            "--sources",
+            str(missing),
+            "--question",
+            "Q",
+            "--no-llm",
+            "--output-dir",
+            str(output_dir),
+        ]
     )
 
     assert exit_code == 1
@@ -628,6 +651,7 @@ def test_single_markdown_file_can_be_inventoried_and_indexed(tmp_path: Path) -> 
                 str(source_file),
                 "--question",
                 "Q",
+                "--no-llm",
                 "--output-dir",
                 str(output_dir),
             ]
