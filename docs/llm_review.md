@@ -24,6 +24,17 @@ Validation rejects output that is malformed, misses required fields, uses an uns
 
 A failed validation is safer than a misleading successful review. The failed artifact preserves validator messages and rejected item summaries without treating unsafe model output as accepted review material.
 
+## Follow-up analysis for gaps and contradiction candidates
+
+After `claim_review.json` passes validation, PR #7 runs one bounded follow-up LLM call over the saved LLM-safe context and the validated claim review. It writes two artifacts only if this stage can be safely parsed and validated:
+
+- `missing_evidence.json` for evidence gaps or uncertainties in the supplied evidence.
+- `contradiction_log.json` for possible tensions between cited evidence chunks.
+
+Missing evidence is a gap signal, not proof that an artifact does not exist elsewhere. Contradiction candidates must cite valid evidence IDs on both sides so a human can inspect the exact chunks. A candidate is not a final contradiction finding.
+
+If follow-up output is malformed, cites invented evidence IDs, uses source IDs instead of evidence IDs, invents claim IDs, omits required contradiction-side citations, or uses verdict language, validation fails. A failed validation artifact is safer than a misleading successful artifact.
+
 ## Not approval
 
-`claim_review.json` is not a project decision. It does not approve readiness, compliance, certification, security, privacy, legal status, or go-live. Human review remains the final authority.
+`claim_review.json`, `missing_evidence.json`, and `contradiction_log.json` are review material. They do not approve readiness, compliance, certification, security, privacy, legal status, or go-live. Human review remains the final authority.

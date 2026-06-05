@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "project-evidence-review-agent"
 version = "0.1.0"
-description = "Local-first scaffold for bounded project evidence review workflows."
+description = "Local-first bounded project evidence review workflow."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

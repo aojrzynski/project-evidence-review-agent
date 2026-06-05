@@ -385,9 +385,7 @@ def _source_fingerprint(path: Path) -> dict[str, Any]:
         {
             "sha256": sha256,
             "modified_time_ns": stat.st_mtime_ns,
-            "modified_time_utc": datetime.fromtimestamp(
-                stat.st_mtime, UTC
-            ).isoformat(),
+            "modified_time_utc": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
             "fingerprint_status": "recorded",
         }
     )

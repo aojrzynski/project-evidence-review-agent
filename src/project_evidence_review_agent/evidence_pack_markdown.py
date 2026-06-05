@@ -252,8 +252,7 @@ def _bounded_excerpt(text: str) -> str:
     if len(text) <= MAX_EXCERPT_CHARS:
         return text
     return (
-        f"{text[:MAX_EXCERPT_CHARS]}\n"
-        "[excerpt truncated for bounded Markdown output]"
+        f"{text[:MAX_EXCERPT_CHARS]}\n[excerpt truncated for bounded Markdown output]"
     )
 
 
