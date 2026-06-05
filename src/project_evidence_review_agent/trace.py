@@ -5,14 +5,14 @@ of the current implementation. Source inventory records what local material was
 found, evidence indexing chunks loaded supported sources, and deterministic
 retrieval can select a bounded set of lexical matches for the review question.
 
-This trace now records deterministic evidence-pack work, bounded LLM
-claim-review status, bounded follow-up analysis for missing evidence and
-contradiction candidates, and the final human-readable report when those optional
-stages are requested and validated. It still records that readiness, approval,
-legal, compliance, privacy, security, certification, and go-live verdicts are not
-performed. The project protects evidence and authority boundaries by recording
-what happened, what did not happen, and that human review remains the final
-authority.
+This trace now records the selected orchestrator, deterministic evidence-pack
+work, bounded LLM claim-review status, bounded follow-up analysis for missing
+evidence and contradiction candidates, and the final human-readable report
+when those optional stages are requested and validated. It still records that
+readiness, approval, legal, compliance, privacy, security, certification, and
+go-live verdicts are not performed. The project protects evidence and authority
+boundaries by recording what happened, what did not happen, and that human
+review remains the final authority.
 """
 
 from __future__ import annotations
@@ -95,6 +95,11 @@ def build_trace(
     report_contradiction_candidate_count: int = 0,
     report_human_check_count: int = 0,
     final_report_is_not_approval: bool = True,
+    orchestrator: str = "standard",
+    langgraph_requested: bool = False,
+    langgraph_available: bool | None = None,
+    graph_orchestration_status: str = "not_used",
+    graph_node_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON-serializable trace payload for a retrieval run."""
 
@@ -121,6 +126,11 @@ def build_trace(
             project_evidence_report_status=project_evidence_report_status,
         ),
         "artifact": TRACE_FILE_NAME,
+        "orchestrator": orchestrator,
+        "langgraph_requested": langgraph_requested,
+        "langgraph_available": langgraph_available,
+        "graph_orchestration_status": graph_orchestration_status,
+        "graph_node_statuses": graph_node_statuses or {},
         "source_inventory_written": source_inventory_written,
         "loaded_source_count": loaded_source_count,
         "skipped_source_count": skipped_source_count,
@@ -250,6 +260,11 @@ def write_trace(
     report_contradiction_candidate_count: int = 0,
     report_human_check_count: int = 0,
     final_report_is_not_approval: bool = True,
+    orchestrator: str = "standard",
+    langgraph_requested: bool = False,
+    langgraph_available: bool | None = None,
+    graph_orchestration_status: str = "not_used",
+    graph_node_statuses: dict[str, str] | None = None,
 ) -> Path:
     """Write the trace artifact and return its path."""
 
@@ -305,6 +320,11 @@ def write_trace(
         report_contradiction_candidate_count=report_contradiction_candidate_count,
         report_human_check_count=report_human_check_count,
         final_report_is_not_approval=final_report_is_not_approval,
+        orchestrator=orchestrator,
+        langgraph_requested=langgraph_requested,
+        langgraph_available=langgraph_available,
+        graph_orchestration_status=graph_orchestration_status,
+        graph_node_statuses=graph_node_statuses,
     )
     trace_path.write_text(
         json.dumps(trace_payload, indent=2, sort_keys=True) + "\n",

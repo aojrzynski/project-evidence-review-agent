@@ -8,22 +8,23 @@ It does not approve projects, certify readiness, replace governance, or make leg
 
 Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, prepare small source references, and select a bounded set of chunks that match the review question.
 
-The current workflow now has four layers:
+The current workflow now has four product layers, plus an optional orchestration adapter:
 
 1. **Deterministic evidence-pack building** inspects supplied local sources, inventories them, chunks them, retrieves relevant passages, and writes bounded JSON evidence packs plus readable Markdown views.
 2. **Bounded LLM claim review** asks an LLM to draft structured claim review material from only the selected evidence pack, then validates the returned citations and authority boundary before treating the output as successful.
 3. **Validation-bounded follow-up analysis** uses the same bounded context plus validated claim review to identify missing evidence gaps and contradiction candidates for human review.
 4. **Human-readable report assembly** writes `project_evidence_report.md` from validated artifacts after a successful full run, without making another LLM call or adding a new decision stage.
+5. **Optional orchestration selection** runs those same stages through either the default standard Python orchestrator or, when installed and requested, a LangGraph graph that only coordinates existing stages.
 
 The LLM is central to the full claim review workflow, but it is not authoritative. The evidence pack controls the input boundary. The validator controls the output boundary. The final report is an assembly of validated artifacts for a human reviewer.
 
-## Current PR #8 capability
+## Current PR #9 capability
 
-PR #8 adds the human-readable `project_evidence_report.md` after successful full LLM review while keeping deterministic evidence-pack mode available:
+PR #9 adds optional LangGraph workflow orchestration while keeping the standard Python orchestrator as the default and preserving the PR #8 artifact-producing workflow:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
-- Accepts `--question`, `--output-dir`, `--sources`, `--max-chunks`, `--no-llm`, `--llm-model`, and `--version`.
+- Accepts `--question`, `--output-dir`, `--sources`, `--max-chunks`, `--no-llm`, `--llm-model`, `--orchestrator`, and `--version`.
 - Accepts one local source path as either a file or directory.
 - Walks directories recursively while ignoring hidden directories and common Python/tooling cache directories.
 - Loads supported local Markdown, text, JSON, YAML, and CSV files for bounded metadata.
@@ -50,8 +51,36 @@ PR #8 adds the human-readable `project_evidence_report.md` after successful full
 - Makes `project_evidence_report.md` the first artifact to open after a successful full run.
 - Keeps `evidence_pack.md` as the first artifact to open in `--no-llm` mode.
 - Assembles validated artifacts without making another LLM call.
-- Continues writing `project_evidence_trace.json` with deterministic, LLM, follow-up, and report status fields.
+- Continues writing `project_evidence_trace.json` with deterministic, LLM, follow-up, report, and orchestrator status fields.
 - Records that approval and go-live decisions are still not performed.
+
+## Orchestration
+
+The default orchestrator is standard Python:
+
+```bash
+project-evidence-review \
+  --sources examples/project_pack \
+  --question "What evidence shows testing is complete?" \
+  --max-chunks 8 \
+  --no-llm \
+  --orchestrator standard \
+  --output-dir outputs/standard_run
+```
+
+LangGraph orchestration is optional and requires the `graph` extra:
+
+```bash
+project-evidence-review \
+  --sources examples/project_pack \
+  --question "What evidence shows testing is complete?" \
+  --max-chunks 8 \
+  --no-llm \
+  --orchestrator langgraph \
+  --output-dir outputs/langgraph_run
+```
+
+LangGraph changes only orchestration: graph nodes call the same shared workflow stage functions used by the standard path. It does not add evidence sources, change retrieval, change LLM prompts or validation semantics, add LLM calls, approve projects, require LangSmith, or require LangGraph Cloud. The trace records `orchestrator`, `langgraph_requested`, `langgraph_available`, `graph_orchestration_status`, and bounded node statuses when the graph path is used.
 
 ## Supported source file types
 
@@ -64,7 +93,7 @@ Supported extensions are:
 - `.yml`
 - `.csv`
 
-Unsupported files are not treated as review failures. They are skipped with a reason in the source inventory and do not create evidence chunks. PDF, DOCX, OCR, web pages, remote services, external connectors, embeddings, vector databases, and LangGraph are not implemented in this PR.
+Unsupported files are not treated as review failures. They are skipped with a reason in the source inventory and do not create evidence chunks. PDF, DOCX, OCR, web pages, remote services, external connectors, embeddings, and vector databases are not implemented in this PR. LangGraph is supported only as optional local orchestration, not as a cloud service or source of review semantics.
 
 ## Optional LLM dependency
 
@@ -80,6 +109,18 @@ Install development tools plus optional LLM support:
 
 ```bash
 python -m pip install -e ".[dev,llm]"
+```
+
+Install optional LangGraph orchestration support:
+
+```bash
+python -m pip install -e ".[graph]"
+```
+
+Install development tools with both optional groups when desired:
+
+```bash
+python -m pip install -e ".[dev,llm,graph]"
 ```
 
 LLM mode uses the OpenAI Responses API through a small wrapper. It does not use web search, file uploads, code interpreter, MCP, tools, function calling, or streaming.
@@ -221,8 +262,13 @@ The report also includes a selected evidence map, source map, limitations, an ar
 
 ## What the trace records
 
-`project_evidence_trace.json` records the deterministic artifact statuses plus LLM and follow-up fields such as:
+`project_evidence_trace.json` records the deterministic artifact statuses plus LLM, follow-up, report, and orchestration fields such as:
 
+- `orchestrator`
+- `langgraph_requested`
+- `langgraph_available`
+- `graph_orchestration_status`
+- `graph_node_statuses`
 - `no_llm`
 - `llm_model`
 - `llm_safe_review_context_written`
@@ -336,7 +382,7 @@ The initial planned sequence is documented in [docs/roadmap.md](docs/roadmap.md)
 6. PR #6 bounded LLM claim review
 7. PR #7 missing evidence and contradiction detection
 8. PR #8 human-readable project evidence report
-9. PR #9 LangGraph orchestration, if still appropriate
+9. PR #9 optional LangGraph orchestration
 10. PR #10 docs, examples, comments, and release polish
 
 

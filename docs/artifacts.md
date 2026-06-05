@@ -13,4 +13,4 @@ This page lists the local artifacts written by the current workflow and what eac
 - `missing_evidence.json` — validated gap signals from the supplied evidence pack; these are not proof of absence.
 - `contradiction_log.json` — validated possible contradiction candidates; these are not final findings.
 - `project_evidence_report.md` — assembled human-readable report for a successful full run; this is the first artifact to open after full LLM-enabled validation succeeds.
-- `project_evidence_trace.json` — run trace with artifact statuses, counts, report status, and the explicit no-approval/no-go-live boundary.
+- `project_evidence_trace.json` — run trace with artifact statuses, counts, report status, orchestrator metadata (`orchestrator`, `langgraph_requested`, `langgraph_available`, `graph_orchestration_status`, and optional `graph_node_statuses`), and the explicit no-approval/no-go-live boundary.

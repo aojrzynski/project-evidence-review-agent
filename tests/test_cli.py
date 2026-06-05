@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from project_evidence_review_agent import __version__
+from project_evidence_review_agent.claim_review import CLAIM_REVIEW_FILE_NAME
 from project_evidence_review_agent.cli import main
 from project_evidence_review_agent.contradictions import CONTRADICTION_LOG_FILE_NAME
 from project_evidence_review_agent.evidence_index import EVIDENCE_INDEX_FILE_NAME
@@ -39,6 +40,7 @@ def test_cli_help_works(capsys: pytest.CaptureFixture[str]) -> None:
     assert "--max-chunks" in output
     assert "--no-llm" in output
     assert "--llm-model" in output
+    assert "--orchestrator" in output
 
 
 def test_cli_version_works(capsys: pytest.CaptureFixture[str]) -> None:
@@ -730,3 +732,173 @@ def _records_by_file_name(inventory_path: Path) -> dict[str, dict[str, object]]:
 
 def _read_evidence_index(output_dir: Path) -> dict[str, object]:
     return json.loads((output_dir / EVIDENCE_INDEX_FILE_NAME).read_text("utf-8"))
+
+
+def test_default_cli_trace_records_standard_orchestrator(tmp_path: Path) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack_orchestrator_default")
+    output_dir = tmp_path / "orchestrator_default"
+
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                "What evidence shows testing is complete?",
+                "--no-llm",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    trace = _read_json(output_dir / TRACE_FILE_NAME)
+    assert trace["orchestrator"] == "standard"
+    assert trace["langgraph_requested"] is False
+    assert trace["langgraph_available"] is None
+    assert trace["graph_orchestration_status"] == "not_used"
+    assert trace["graph_node_statuses"] == {}
+
+
+def test_explicit_standard_orchestrator_matches_default_artifact_names(
+    tmp_path: Path,
+) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack_standard")
+    default_output = tmp_path / "default"
+    standard_output = tmp_path / "standard"
+    argv = [
+        "--sources",
+        str(sources),
+        "--question",
+        "go-live testing risks release",
+        "--max-chunks",
+        "3",
+        "--no-llm",
+    ]
+
+    assert main([*argv, "--output-dir", str(default_output)]) == 0
+    assert (
+        main(
+            [
+                *argv,
+                "--orchestrator",
+                "standard",
+                "--output-dir",
+                str(standard_output),
+            ]
+        )
+        == 0
+    )
+
+    assert _artifact_names(default_output) == _artifact_names(standard_output)
+    default_pack = _read_json(default_output / EVIDENCE_PACK_FILE_NAME)
+    standard_pack = _read_json(standard_output / EVIDENCE_PACK_FILE_NAME)
+    assert [c["evidence_id"] for c in default_pack["selected_chunks"]] == [
+        c["evidence_id"] for c in standard_pack["selected_chunks"]
+    ]
+
+
+def test_langgraph_orchestrator_missing_dependency_fails_cleanly(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from project_evidence_review_agent.langgraph_workflow import (
+        LANGGRAPH_INSTALL_MESSAGE,
+        LangGraphUnavailableError,
+    )
+
+    def raise_unavailable(*_args: object, **_kwargs: object) -> None:
+        raise LangGraphUnavailableError(LANGGRAPH_INSTALL_MESSAGE)
+
+    monkeypatch.setattr(
+        "project_evidence_review_agent.cli.run_langgraph_workflow",
+        raise_unavailable,
+    )
+    output_dir = tmp_path / "langgraph_missing"
+
+    exit_code = main(
+        [
+            "--question",
+            "Q",
+            "--orchestrator",
+            "langgraph",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "pip install -e '.[graph]'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_langgraph_orchestrator_no_llm_matches_standard_when_available(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("langgraph", reason="optional graph dependencies not installed")
+    sources = _write_source_pack(tmp_path / "project_pack_langgraph")
+    standard_output = tmp_path / "standard"
+    graph_output = tmp_path / "langgraph"
+    argv = [
+        "--sources",
+        str(sources),
+        "--question",
+        "go-live testing risks release",
+        "--max-chunks",
+        "3",
+        "--no-llm",
+    ]
+
+    assert (
+        main(
+            [
+                *argv,
+                "--orchestrator",
+                "standard",
+                "--output-dir",
+                str(standard_output),
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                *argv,
+                "--orchestrator",
+                "langgraph",
+                "--output-dir",
+                str(graph_output),
+            ]
+        )
+        == 0
+    )
+
+    assert _artifact_names(standard_output) == _artifact_names(graph_output)
+    assert not (graph_output / CLAIM_REVIEW_FILE_NAME).exists()
+    assert not (graph_output / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert not (graph_output / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert (graph_output / EVIDENCE_PACK_MARKDOWN_FILE_NAME).exists()
+
+    standard_trace = _read_json(standard_output / TRACE_FILE_NAME)
+    graph_trace = _read_json(graph_output / TRACE_FILE_NAME)
+    for key in [
+        "loaded_source_count",
+        "skipped_source_count",
+        "evidence_chunk_count",
+        "selected_evidence_chunk_count",
+        "llm_review_status",
+        "missing_evidence_detection_status",
+        "contradiction_detection_status",
+        "project_evidence_report_status",
+    ]:
+        assert standard_trace[key] == graph_trace[key]
+    assert graph_trace["orchestrator"] == "langgraph"
+    assert graph_trace["graph_orchestration_status"] == "completed"
+
+
+def _artifact_names(output_dir: Path) -> set[str]:
+    return {path.name for path in output_dir.iterdir() if path.is_file()}
