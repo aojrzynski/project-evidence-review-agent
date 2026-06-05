@@ -1,14 +1,14 @@
 # Project Evidence Review Agent
 
-Project Evidence Review Agent is a bounded, local-first workflow for helping a human inspect project evidence. It organizes supplied project material, records what was found and skipped, and keeps authority with the reviewer.
+Project Evidence Review Agent is a bounded, local-first workflow for helping a human inspect project evidence. It organizes supplied project material, records what was found and skipped, creates bounded evidence chunks for later citation, and keeps authority with the reviewer.
 
 It does not approve projects, certify readiness, replace governance, or make legal, compliance, privacy, security, or go-live decisions. Human review remains the final authority.
 
 ## Plain-English purpose
 
-Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, and preserve clear boundaries before any later review step.
+Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, and prepare small source references that can be checked later.
 
-PR #2 adds that intake foundation. The tool can now inventory local source files and write a deterministic `source_inventory.json` artifact. Source inventory is not evidence review. Loading a file does not mean its contents support any claim.
+PR #3 adds deterministic evidence indexing after source inventory. The tool can now inventory local source files and write a deterministic `source_inventory.json` artifact, then split loaded supported files into bounded chunks in `evidence_index.json`. Source inventory is not evidence review. Evidence indexing is not evidence review. A chunk existing does not mean its contents support the review question.
 
 ## Deterministic evidence packs and LLM review
 
@@ -19,9 +19,9 @@ The planned workflow has two different layers:
 
 A later `--no-llm` mode should mean evidence-pack-only. It should not mean a full review without the model. In that mode, the tool should stop after producing deterministic evidence artifacts for a human or separate review step.
 
-## What PR #2 currently does
+## What PR #3 currently does
 
-PR #2 provides local source inventory and intake support:
+PR #3 provides local source inventory plus deterministic evidence indexing:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
@@ -32,13 +32,18 @@ PR #2 provides local source inventory and intake support:
 - Skips unsupported file extensions with clear reasons.
 - Creates the output directory when needed.
 - Writes `source_inventory.json` when `--sources` is supplied.
+- Writes `evidence_index.json` when `--sources` is supplied.
+- Creates stable `EV-0001`-style evidence IDs in deterministic source and chunk order.
+- Links each evidence chunk back to `SRC-0001`-style source inventory records.
+- Preserves line references for Markdown and text where practical.
+- Preserves row references for CSV data rows where practical.
 - Continues writing `project_evidence_trace.json`.
-- Records that no chunking, retrieval, LLM review, or approval decision happened.
-- Adds a standard MIT license, synthetic example project material, tests, Ruff configuration, and CI-ready checks.
+- Records that no retrieval, evidence pack, LLM review, or approval decision happened.
+- Adds synthetic example project material, tests, Ruff configuration, and CI-ready checks.
 
 ## Supported source file types
 
-PR #2 supports these extensions:
+PR #3 supports these extensions:
 
 - `.md`
 - `.txt`
@@ -47,7 +52,7 @@ PR #2 supports these extensions:
 - `.yml`
 - `.csv`
 
-Unsupported files are not treated as review failures. They are skipped with a reason in the source inventory. PDF, DOCX, OCR, web pages, remote services, external connectors, embeddings, vector databases, OpenAI, and LangGraph are not implemented in this PR.
+Unsupported files are not treated as review failures. They are skipped with a reason in the source inventory and do not create evidence chunks. PDF, DOCX, OCR, web pages, remote services, external connectors, embeddings, vector databases, OpenAI, and LangGraph are not implemented in this PR.
 
 ## What `source_inventory.json` contains
 
@@ -67,14 +72,35 @@ When `--sources` is supplied, the tool writes `source_inventory.json` with deter
 
 The inventory deliberately does not dump whole documents into the artifact and does not say whether any source supports a claim.
 
+## What `evidence_index.json` contains
+
+When `--sources` is supplied, the tool also writes `evidence_index.json`. The evidence index answers a different question from source inventory:
+
+- Source inventory says, “What local files were found, loaded, or skipped?”
+- Evidence index says, “What bounded pieces of loaded local evidence are available for later retrieval and review?”
+
+Each evidence chunk includes fields such as:
+
+- `evidence_id`, such as `EV-0001`.
+- `source_id`, such as `SRC-0001`.
+- `source_path`, `source_file_name`, and `source_type`.
+- `chunk_index` within the source.
+- `heading`, where practical.
+- `start_line` and `end_line` for Markdown and text where practical.
+- `start_row` and `end_row` for CSV data rows where practical.
+- `text`, `text_preview`, `char_count`, and `word_count`.
+- `chunk_strategy`, which explains how the chunk was created.
+
+Chunks are bounded so later review steps can work with small, inspectable source references instead of entire files. Stable evidence IDs matter because later retrieval, citation, validation, and human checks need a consistent way to point back to the same chunk. Line and row references help a human find the original local source location.
+
+The evidence index is still preparation only. It does not retrieve chunks for the question, decide whether a chunk supports or contradicts anything, call an LLM, or make a project decision.
+
 ## What is not implemented yet
 
-PR #2 deliberately does not:
+PR #3 deliberately does not:
 
-- Chunk documents.
-- Create `evidence_index.json`.
 - Create `review_question.json`.
-- Retrieve evidence.
+- Retrieve evidence for the question.
 - Create `retrieval_trace.json`.
 - Create `evidence_pack.json`.
 - Create `evidence_pack.md`.
@@ -94,8 +120,9 @@ The workflow is intended to help a human review evidence. It must not become an 
 
 Current and future outputs should preserve these boundaries:
 
-- The tool should separate inventory from evidence review.
+- The tool should separate inventory from evidence indexing and evidence review.
 - Loading a file should not imply that the file supports any project claim.
+- Creating a chunk should not imply that the chunk is relevant to the review question.
 - Future claims should cite evidence IDs.
 - Missing evidence and possible contradictions should be shown as review prompts, not final verdicts.
 - The LLM should eventually reason only over bounded supplied evidence.
@@ -115,23 +142,24 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-Run the intake command with synthetic local sources:
+Run the intake and indexing command with synthetic local sources:
 
 ```bash
 project-evidence-review \
   --sources examples/project_pack \
   --question "Is the project ready for go-live?" \
-  --output-dir outputs/source_inventory_run
+  --output-dir outputs/evidence_index_run
 ```
 
 Expected result:
 
 ```text
-outputs/source_inventory_run/source_inventory.json
-outputs/source_inventory_run/project_evidence_trace.json
+outputs/evidence_index_run/source_inventory.json
+outputs/evidence_index_run/evidence_index.json
+outputs/evidence_index_run/project_evidence_trace.json
 ```
 
-The trace records the question, output directory, supplied source path, source inventory counts, package version, timestamp, and authority boundary. It also confirms that no chunking, retrieval, LLM review, or approval decision happened.
+The trace records the question, output directory, supplied source path, source inventory counts, evidence chunk counts, package version, timestamp, and authority boundary. It also confirms that no retrieval, evidence pack, LLM review, or approval decision happened.
 
 You can still run without `--sources` to write only the trace:
 

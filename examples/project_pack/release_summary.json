@@ -1,5 +1,10 @@
 {
   "release": "2026.1-demo",
-  "summary": "Synthetic release summary for local inventory tests.",
-  "ready_for_review": true
+  "summary": "Synthetic release summary for local inventory and chunking tests.",
+  "ready_for_review": true,
+  "sections": {
+    "deployment": "A fake staged deployment is planned for demonstration only.",
+    "rollback": "A synthetic rollback note exists but still needs human inspection.",
+    "support": "Example support owner is listed in the local demo material."
+  }
 }

@@ -3,3 +3,7 @@ environment: local-demo
 review_required: true
 owners:
   - Example Owner
+review_sections:
+  deployment: synthetic checklist
+  rollback: synthetic rollback note
+  testing: synthetic test notes

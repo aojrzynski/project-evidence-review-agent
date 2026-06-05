@@ -102,6 +102,14 @@ def write_source_inventory(sources_path: Path, output_dir: Path) -> InventorySum
     """Write ``source_inventory.json`` and return counts for the trace."""
 
     inventory = build_source_inventory(sources_path)
+    return write_source_inventory_payload(inventory=inventory, output_dir=output_dir)
+
+
+def write_source_inventory_payload(
+    inventory: dict[str, Any], output_dir: Path
+) -> InventorySummary:
+    """Write a prebuilt inventory payload without changing its contract."""
+
     output_dir.mkdir(parents=True, exist_ok=True)
     inventory_path = output_dir / SOURCE_INVENTORY_FILE_NAME
     inventory_path.write_text(
