@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "aojrzynski" }]
-dependencies = []
+dependencies = [
+  "PyYAML>=6",
+]
 
 [project.scripts]
 project-evidence-review = "project_evidence_review_agent.cli:main"
