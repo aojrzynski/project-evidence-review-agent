@@ -85,6 +85,7 @@ class RetrievalSummary:
 
     retrieval_trace_path: Path
     evidence_pack_path: Path
+    evidence_pack_payload: dict[str, Any]
     selected_chunk_count: int
     source_fingerprint_warning_count: int
 
@@ -144,6 +145,7 @@ def build_retrieval_outputs(
         "evidence_pack_version": 1,
         "question": question,
         "retrieval_strategy": RETRIEVAL_STRATEGY,
+        "max_chunks": max_chunks,
         "selected_chunk_count": len(selected),
         "selected_chunks": [_pack_chunk(candidate) for candidate in selected],
         "source_map": _source_map(selected),
@@ -173,6 +175,7 @@ def write_retrieval_outputs(
     return RetrievalSummary(
         retrieval_trace_path=retrieval_trace_path,
         evidence_pack_path=evidence_pack_path,
+        evidence_pack_payload=evidence_pack,
         selected_chunk_count=evidence_pack["selected_chunk_count"],
         source_fingerprint_warning_count=len(
             trace.get("source_fingerprint_notes", {}).get("warnings", [])

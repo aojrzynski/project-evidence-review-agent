@@ -8,6 +8,10 @@ import pytest
 from project_evidence_review_agent import __version__
 from project_evidence_review_agent.cli import main
 from project_evidence_review_agent.evidence_index import EVIDENCE_INDEX_FILE_NAME
+from project_evidence_review_agent.evidence_pack_markdown import (
+    EVIDENCE_PACK_MARKDOWN_FILE_NAME,
+    render_evidence_pack_markdown,
+)
 from project_evidence_review_agent.retrieval import (
     EVIDENCE_PACK_FILE_NAME,
     RETRIEVAL_TRACE_FILE_NAME,
@@ -49,6 +53,7 @@ def test_cli_works_without_sources_preserving_scaffold_boundary(tmp_path: Path) 
     assert trace_path.exists()
     assert not (output_dir / SOURCE_INVENTORY_FILE_NAME).exists()
     assert not (output_dir / EVIDENCE_INDEX_FILE_NAME).exists()
+    assert not (output_dir / EVIDENCE_PACK_MARKDOWN_FILE_NAME).exists()
 
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
     assert trace["review_question"] == question
@@ -68,6 +73,9 @@ def test_cli_works_without_sources_preserving_scaffold_boundary(tmp_path: Path) 
     assert trace["review_question_written"] is False
     assert trace["retrieval_trace_written"] is False
     assert trace["evidence_pack_written"] is False
+    assert trace["evidence_pack_markdown_written"] is False
+    assert trace["evidence_pack_markdown_status"] == "not_performed"
+    assert trace["evidence_pack_markdown_path"] is None
     assert "no retrieval" in trace["scaffold_note"]
     assert "no LLM review was performed" in trace["scaffold_note"]
     assert "Human review remains the final authority" in trace["authority_boundary"]
@@ -100,6 +108,7 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert (output_dir / REVIEW_QUESTION_FILE_NAME).exists()
     assert (output_dir / RETRIEVAL_TRACE_FILE_NAME).exists()
     assert (output_dir / EVIDENCE_PACK_FILE_NAME).exists()
+    assert (output_dir / EVIDENCE_PACK_MARKDOWN_FILE_NAME).exists()
 
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     evidence_index = json.loads(evidence_index_path.read_text(encoding="utf-8"))
@@ -117,6 +126,11 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert trace["review_question_written"] is True
     assert trace["retrieval_trace_written"] is True
     assert trace["evidence_pack_written"] is True
+    assert trace["evidence_pack_markdown_written"] is True
+    assert trace["evidence_pack_markdown_status"] == "completed"
+    assert trace["evidence_pack_markdown_path"].endswith(
+        EVIDENCE_PACK_MARKDOWN_FILE_NAME
+    )
     assert trace["retrieval_status"] == "completed"
     assert trace["evidence_pack_status"] == "completed"
     assert trace["llm_review_status"] == "not_performed"
@@ -125,7 +139,126 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert trace["missing_evidence_detection_status"] == "not_performed"
     assert trace["contradiction_detection_status"] == "not_performed"
     assert trace["markdown_report_status"] == "not_performed"
+    assert trace["project_evidence_markdown_report_status"] == "not_performed"
     assert trace["max_chunks"] == 10
+
+
+
+def test_cli_with_sources_writes_readable_evidence_pack_markdown(
+    tmp_path: Path,
+) -> None:
+    question = "Which synthetic testing release risks need human review?"
+    sources = _write_source_pack(tmp_path / "project_pack")
+    output_dir = tmp_path / "markdown_run"
+
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                question,
+                "--max-chunks",
+                "4",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    evidence_pack = _read_json(output_dir / EVIDENCE_PACK_FILE_NAME)
+    markdown = (output_dir / EVIDENCE_PACK_MARKDOWN_FILE_NAME).read_text("utf-8")
+    trace = _read_json(output_dir / TRACE_FILE_NAME)
+
+    assert question in markdown
+    assert "# Evidence Pack" in markdown
+    assert "## Important boundary" in markdown
+    assert "review preparation, not project approval" in markdown
+    assert "A selected chunk is not automatically supporting evidence" in markdown
+    assert "No LLM was used" in markdown
+    assert "Human review remains the final authority" in markdown
+    assert "Matched terms" in markdown
+    assert "Retrieval score" in markdown
+    assert "Reference: lines" in markdown or "Reference: rows" in markdown
+    assert "```text" in markdown
+    assert "| Source ID | File name | Path | Type | Fingerprint |" in markdown
+    assert "go-live is approved" not in markdown.lower()
+    assert "project is approved" not in markdown.lower()
+    assert "claim is supported" not in markdown.lower()
+    assert "claim is contradicted" not in markdown.lower()
+
+    selected_chunks = evidence_pack["selected_chunks"]
+    assert selected_chunks
+    for chunk in selected_chunks:
+        assert chunk["evidence_id"] in markdown
+        assert chunk["source_id"] in markdown
+        assert chunk["source_file_name"] in markdown
+        assert chunk["source_path"] in markdown
+        assert str(chunk["retrieval_score"]) in markdown
+        for term in chunk["matched_terms"]:
+            assert f"`{term}`" in markdown
+        if "start_line" in chunk:
+            assert f"lines {chunk['start_line']}-{chunk['end_line']}" in markdown
+        if "start_row" in chunk:
+            assert f"rows {chunk['start_row']}-{chunk['end_row']}" in markdown
+
+    assert trace["evidence_pack_markdown_written"] is True
+    assert trace["selected_evidence_chunk_count"] == len(selected_chunks)
+    assert trace["llm_review_status"] == "not_performed"
+    assert trace["missing_evidence_detection_status"] == "not_performed"
+    assert trace["contradiction_detection_status"] == "not_performed"
+    assert trace["project_evidence_markdown_report_status"] == "not_performed"
+    assert trace["approval_decision_status"] == "not_performed"
+
+
+def test_markdown_renderer_is_deterministic_and_non_interpretive() -> None:
+    payload = {
+        "question": "Do synthetic tests mention release risk?",
+        "retrieval_strategy": "deterministic_term_overlap_v1",
+        "max_chunks": 2,
+        "selected_chunk_count": 1,
+        "selected_chunks": [
+            {
+                "evidence_id": "EV-0001",
+                "source_id": "SRC-0001",
+                "source_path": "synthetic/testing_notes.txt",
+                "source_file_name": "testing_notes.txt",
+                "source_type": "text",
+                "start_line": 1,
+                "end_line": 2,
+                "text": "Synthetic release risk note for human review.",
+                "matched_terms": ["release", "risk"],
+                "retrieval_score": 6,
+                "sha256": "abcdef1234567890",
+                "fingerprint_status": "recorded",
+            }
+        ],
+        "source_map": {
+            "SRC-0001": {
+                "source_id": "SRC-0001",
+                "source_path": "synthetic/testing_notes.txt",
+                "source_file_name": "testing_notes.txt",
+                "source_type": "text",
+                "sha256": "abcdef1234567890",
+                "fingerprint_status": "recorded",
+            }
+        },
+        "limitations": ["Synthetic limitation."],
+    }
+
+    first = render_evidence_pack_markdown(payload)
+    second = render_evidence_pack_markdown(payload)
+
+    assert first == second
+    assert "EV-0001" in first
+    assert "SRC-0001" in first
+    assert "testing_notes.txt" in first
+    assert "lines 1-2" in first
+    assert "review preparation, not project approval" in first
+    assert "not automatically supporting evidence" in first
+    assert "No LLM was used" in first
+    assert "claim is supported" not in first.lower()
 
 
 def test_review_question_retrieval_and_evidence_pack_artifacts(tmp_path: Path) -> None:
@@ -235,8 +368,15 @@ def test_retrieval_is_deterministic_across_repeated_runs(tmp_path: Path) -> None
     second_trace = _read_json(second_output / RETRIEVAL_TRACE_FILE_NAME)
     first_pack = _read_json(first_output / EVIDENCE_PACK_FILE_NAME)
     second_pack = _read_json(second_output / EVIDENCE_PACK_FILE_NAME)
+    first_markdown = (first_output / EVIDENCE_PACK_MARKDOWN_FILE_NAME).read_text(
+        "utf-8"
+    )
+    second_markdown = (second_output / EVIDENCE_PACK_MARKDOWN_FILE_NAME).read_text(
+        "utf-8"
+    )
     assert first_trace == second_trace
     assert first_pack == second_pack
+    assert first_markdown == second_markdown
 
 
 def test_source_fingerprints_present_for_loaded_files(tmp_path: Path) -> None:
