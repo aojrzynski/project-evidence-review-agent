@@ -7,11 +7,13 @@ import pytest
 
 from project_evidence_review_agent import __version__
 from project_evidence_review_agent.cli import main
+from project_evidence_review_agent.contradictions import CONTRADICTION_LOG_FILE_NAME
 from project_evidence_review_agent.evidence_index import EVIDENCE_INDEX_FILE_NAME
 from project_evidence_review_agent.evidence_pack_markdown import (
     EVIDENCE_PACK_MARKDOWN_FILE_NAME,
     render_evidence_pack_markdown,
 )
+from project_evidence_review_agent.missing_evidence import MISSING_EVIDENCE_FILE_NAME
 from project_evidence_review_agent.retrieval import (
     EVIDENCE_PACK_FILE_NAME,
     RETRIEVAL_TRACE_FILE_NAME,
@@ -112,6 +114,8 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert (output_dir / RETRIEVAL_TRACE_FILE_NAME).exists()
     assert (output_dir / EVIDENCE_PACK_FILE_NAME).exists()
     assert (output_dir / EVIDENCE_PACK_MARKDOWN_FILE_NAME).exists()
+    assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
 
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     evidence_index = json.loads(evidence_index_path.read_text(encoding="utf-8"))
@@ -139,12 +143,11 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
-    assert trace["missing_evidence_detection_status"] == "not_performed"
-    assert trace["contradiction_detection_status"] == "not_performed"
+    assert trace["missing_evidence_detection_status"] == "skipped_no_llm"
+    assert trace["contradiction_detection_status"] == "skipped_no_llm"
     assert trace["markdown_report_status"] == "not_performed"
     assert trace["project_evidence_markdown_report_status"] == "not_performed"
     assert trace["max_chunks"] == 10
-
 
 
 def test_cli_with_sources_writes_readable_evidence_pack_markdown(
@@ -210,8 +213,8 @@ def test_cli_with_sources_writes_readable_evidence_pack_markdown(
     assert trace["evidence_pack_markdown_written"] is True
     assert trace["selected_evidence_chunk_count"] == len(selected_chunks)
     assert trace["llm_review_status"] == "skipped_no_llm"
-    assert trace["missing_evidence_detection_status"] == "not_performed"
-    assert trace["contradiction_detection_status"] == "not_performed"
+    assert trace["missing_evidence_detection_status"] == "skipped_no_llm"
+    assert trace["contradiction_detection_status"] == "skipped_no_llm"
     assert trace["project_evidence_markdown_report_status"] == "not_performed"
     assert trace["approval_decision_status"] == "not_performed"
 
@@ -298,12 +301,10 @@ def test_review_question_retrieval_and_evidence_pack_artifacts(tmp_path: Path) -
     assert retrieval_trace["max_chunks"] == 3
     assert 0 < retrieval_trace["selected_chunk_count"] <= 3
     assert (
-        evidence_pack["selected_chunk_count"]
-        == retrieval_trace["selected_chunk_count"]
+        evidence_pack["selected_chunk_count"] == retrieval_trace["selected_chunk_count"]
     )
     assert (
-        trace["selected_evidence_chunk_count"]
-        == evidence_pack["selected_chunk_count"]
+        trace["selected_evidence_chunk_count"] == evidence_pack["selected_chunk_count"]
     )
 
     selected = retrieval_trace["selected_chunks"]
@@ -315,9 +316,7 @@ def test_review_question_retrieval_and_evidence_pack_artifacts(tmp_path: Path) -
     pack_chunks = evidence_pack["selected_chunks"]
     assert all(chunk["text"] for chunk in pack_chunks)
     assert all(chunk["evidence_id"] and chunk["source_id"] for chunk in pack_chunks)
-    assert any(
-        "start_line" in chunk or "start_row" in chunk for chunk in pack_chunks
-    )
+    assert any("start_line" in chunk or "start_row" in chunk for chunk in pack_chunks)
     assert "unsupported_document.pdf" not in {
         chunk["source_file_name"] for chunk in pack_chunks
     }

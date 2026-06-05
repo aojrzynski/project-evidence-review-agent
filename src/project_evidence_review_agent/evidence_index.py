@@ -508,14 +508,13 @@ def _source_consistency(record: dict[str, Any], path: Path) -> dict[str, Any]:
         return {
             "source_consistency_status": "warning",
             "source_consistency_warning": (
-                "source could not be fingerprinted during indexing: " f"{exc}"
+                f"source could not be fingerprinted during indexing: {exc}"
             ),
         }
 
     current_modified_utc = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-    if (
-        current_sha256 != record.get("sha256")
-        or stat.st_mtime_ns != record.get("modified_time_ns")
+    if current_sha256 != record.get("sha256") or stat.st_mtime_ns != record.get(
+        "modified_time_ns"
     ):
         result.update(
             {

@@ -8,16 +8,17 @@ It does not approve projects, certify readiness, replace governance, or make leg
 
 Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, prepare small source references, and select a bounded set of chunks that match the review question.
 
-The current workflow now has two layers:
+The current workflow now has three layers:
 
 1. **Deterministic evidence-pack building** inspects supplied local sources, inventories them, chunks them, retrieves relevant passages, and writes bounded JSON evidence packs plus readable Markdown views.
 2. **Bounded LLM claim review** asks an LLM to draft structured claim review material from only the selected evidence pack, then validates the returned citations and authority boundary before treating the output as successful.
+3. **Validation-bounded follow-up analysis** uses the same bounded context plus validated claim review to identify missing evidence gaps and contradiction candidates for human review.
 
 The LLM is central to the full claim review workflow, but it is not authoritative. The evidence pack controls the input boundary. The validator controls the output boundary.
 
-## Current PR #6 capability
+## Current PR #7 capability
 
-PR #6 provides bounded LLM claim review while keeping deterministic evidence-pack mode available:
+PR #7 provides bounded LLM claim review plus missing evidence and contradiction candidate artifacts while keeping deterministic evidence-pack mode available:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
@@ -40,8 +41,12 @@ PR #6 provides bounded LLM claim review while keeping deterministic evidence-pac
 - By default, when `--sources` is supplied, attempts bounded LLM claim review.
 - Writes `llm_safe_review_context.json` before an LLM call in LLM mode.
 - Writes `claim_review.json` with validated claims, or a failed validation artifact when model output is unsafe.
-- Continues writing `project_evidence_trace.json` with deterministic and LLM status fields.
-- Records that missing evidence detection, contradiction detection, final project evidence report, and approval decisions are still not performed.
+- After successful claim review, writes `missing_evidence.json` with validation-bounded evidence gap signals.
+- After successful claim review, writes `contradiction_log.json` with validation-bounded contradiction candidates.
+- Requires contradiction candidates to cite valid evidence IDs on both sides.
+- Allows missing evidence entries to describe gaps where evidence was not found.
+- Continues writing `project_evidence_trace.json` with deterministic, LLM, missing evidence, and contradiction status fields.
+- Records that the final project evidence report and approval decisions are still not performed.
 
 ## Supported source file types
 
@@ -74,7 +79,7 @@ python -m pip install -e ".[dev,llm]"
 
 LLM mode uses the OpenAI Responses API through a small wrapper. It does not use web search, file uploads, code interpreter, MCP, tools, function calling, or streaming.
 
-If `--sources` is supplied and `--no-llm` is not supplied, the CLI attempts LLM claim review. If OpenAI is not installed or `OPENAI_API_KEY` is not configured, the command fails cleanly and explains how to rerun with `--no-llm`.
+If `--sources` is supplied and `--no-llm` is not supplied, the CLI attempts LLM claim review and then follow-up analysis for missing evidence and contradiction candidates after claim review succeeds. If OpenAI is not installed or `OPENAI_API_KEY` is not configured, the command fails cleanly and explains how to rerun with `--no-llm`.
 
 ## Deterministic mode with `--no-llm`
 
@@ -127,6 +132,8 @@ outputs/claim_review_run/evidence_pack.json
 outputs/claim_review_run/evidence_pack.md
 outputs/claim_review_run/llm_safe_review_context.json
 outputs/claim_review_run/claim_review.json
+outputs/claim_review_run/missing_evidence.json
+outputs/claim_review_run/contradiction_log.json
 outputs/claim_review_run/project_evidence_trace.json
 ```
 
@@ -141,6 +148,14 @@ outputs/claim_review_run/project_evidence_trace.json
 - Explicit review instructions, forbidden outputs, authority boundaries, and context limit notes.
 
 It does not include skipped unsupported files, the full source inventory, the full evidence index, unselected chunks, raw project folders, or anything outside the selected evidence pack.
+
+
+In deterministic mode, the command does not write:
+
+- `llm_safe_review_context.json`
+- `claim_review.json`
+- `missing_evidence.json`
+- `contradiction_log.json`
 
 ## What `claim_review.json` contains
 
@@ -187,7 +202,7 @@ Uncited, invented, malformed, or authority-overreaching model output is rejected
 
 ## What the trace records
 
-`project_evidence_trace.json` records the deterministic artifact statuses plus LLM fields such as:
+`project_evidence_trace.json` records the deterministic artifact statuses plus LLM and follow-up fields such as:
 
 - `no_llm`
 - `llm_model`
@@ -200,8 +215,18 @@ Uncited, invented, malformed, or authority-overreaching model output is rejected
 - `claim_count`
 - `rejected_claim_count`
 - `validator_message_count`
+- `missing_evidence_written`
+- `missing_evidence_status`
+- `missing_evidence_validation_status`
+- `missing_evidence_count`
+- `rejected_missing_evidence_count`
+- `contradiction_log_written`
+- `contradiction_detection_status`
+- `contradiction_validation_status`
+- `contradiction_candidate_count`
+- `rejected_contradiction_count`
 
-The trace still confirms no missing evidence detection, no contradiction detection, no final project evidence report, and no approval or go-live decision.
+The trace still confirms no final project evidence report and no approval or go-live decision.
 
 ## Safety and authority boundaries
 
@@ -215,7 +240,7 @@ Current and future outputs should preserve these boundaries:
 - Selecting a chunk does not imply that the chunk supports or contradicts the question.
 - The LLM must reason only over bounded supplied evidence.
 - Claims that indicate support must cite evidence IDs.
-- Missing evidence and possible contradictions are future stages and should be shown as review prompts, not final verdicts.
+- Missing evidence and possible contradictions are current follow-up artifacts and are review prompts, not final verdicts.
 - Claim review is review material, not project approval.
 - Human review remains the final authority.
 
@@ -284,3 +309,14 @@ The initial planned sequence is documented in [docs/roadmap.md](docs/roadmap.md)
 8. PR #8 human-readable project evidence report
 9. PR #9 LangGraph orchestration, if still appropriate
 10. PR #10 docs, examples, comments, and release polish
+
+
+## What `missing_evidence.json` and `contradiction_log.json` contain
+
+`missing_evidence.json` records LLM-assisted, validation-bounded gap signals. A gap may mean the selected evidence does not appear to contain a specific artifact, the evidence is unclear, the area was not searched in the bounded context, or a human follow-up is needed. Missing evidence is not proof that something does not exist.
+
+Each missing evidence entry uses a deterministic `ME-0001`-style ID, an allowed gap type, related claim and evidence IDs when available, a practical human check, and a low/medium/high confidence value. Entries may have no related evidence IDs when the point is that evidence was not found.
+
+`contradiction_log.json` records contradiction candidates, not final findings. Every candidate uses a deterministic `CON-0001`-style ID and must cite valid `EV-0001`-style evidence IDs on both side A and side B. Source IDs alone are rejected. Invented evidence IDs are rejected.
+
+Both artifacts are produced only after `claim_review.json` passes validation. If follow-up validation fails, failed artifacts preserve validator messages and rejected item summaries instead of pretending the analysis succeeded. The final Markdown report remains future PR #8.

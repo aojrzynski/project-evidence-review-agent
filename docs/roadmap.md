@@ -9,14 +9,14 @@ This roadmap keeps early work narrow and reviewable. Each step should preserve t
 3. **PR #3 chunking and evidence index** — split loaded supported local sources into bounded chunks, assign stable `EV-0001`-style evidence IDs, preserve source references plus line or row references where practical, and write `evidence_index.json` without retrieval or review.
 4. **PR #4 review question and retrieval** — record the supplied review question, run deterministic keyword retrieval over evidence chunks, explain selected chunks in `retrieval_trace.json`, and write bounded `evidence_pack.json` without reviewing claims.
 5. **PR #5 deterministic evidence pack Markdown** — render `evidence_pack.md` from the same `evidence_pack.json` payload, showing selected chunks, source references, matched terms, retrieval scores, limitations, and review-preparation boundaries before any LLM review.
-6. **PR #6 bounded LLM claim review** — current capability: build an LLM-safe context from the selected evidence pack, call an optional LLM client, write validated `claim_review.json`, reject malformed, uncited, invented, or authority-overreaching output, and keep `--no-llm` deterministic mode available.
-7. **PR #7 missing evidence and contradiction detection** — identify gaps and possible contradictions for human review.
+6. **PR #6 bounded LLM claim review** — build an LLM-safe context from the selected evidence pack, call an optional LLM client, write validated `claim_review.json`, reject malformed, uncited, invented, or authority-overreaching output, and keep `--no-llm` deterministic mode available.
+7. **PR #7 missing evidence and contradiction detection** — current capability: after a successful validated claim review, run one bounded follow-up LLM call, write validated `missing_evidence.json` and `contradiction_log.json`, require contradiction candidates to cite valid evidence IDs on both sides, and treat gaps and possible tensions as human-review support only.
 8. **PR #8 human-readable project evidence report** — produce a clear report that separates evidence, gaps, contradictions, and suggested human checks.
 9. **PR #9 LangGraph orchestration, if still appropriate** — add graph orchestration only if the workflow benefits from it.
 10. **PR #10 docs, examples, comments, and release polish** — improve examples, comments, and release readiness without expanding the authority boundary.
 
-## Current PR #6 boundary
+## Current PR #7 boundary
 
-PR #6 records the supplied review question, retrieves lexically relevant chunks from the deterministic evidence index, writes a bounded JSON evidence pack, renders `evidence_pack.md`, builds `llm_safe_review_context.json`, and writes `claim_review.json` when LLM output passes deterministic validation. The LLM receives only selected evidence-pack content and allowed evidence IDs.
+PR #7 records the supplied review question, retrieves lexically relevant chunks from the deterministic evidence index, writes a bounded JSON evidence pack, renders `evidence_pack.md`, builds `llm_safe_review_context.json`, writes validated `claim_review.json`, and then writes `missing_evidence.json` and `contradiction_log.json` only when claim review succeeds.
 
-Claim review is still review material only. It does not detect missing evidence as a separate workflow stage, detect contradictions as a separate workflow stage, write the final project evidence report, or produce readiness, compliance, certification, approval, or go-live decisions. Human review remains the final authority.
+Missing evidence is a gap signal within the supplied evidence, not proof that something does not exist. Contradiction candidates are possible tensions that require human review, not final findings. The workflow still does not write the final project evidence report or produce readiness, compliance, certification, approval, or go-live decisions. Human review remains the final authority.

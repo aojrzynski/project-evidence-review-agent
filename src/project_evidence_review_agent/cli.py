@@ -1,10 +1,9 @@
-"""Command-line interface for local project evidence retrieval.
+"""Command-line interface for bounded project evidence review.
 
 The CLI records a human review question, inventories supported local sources,
-creates a deterministic evidence index, and retrieves bounded lexically relevant
-chunks when ``--sources`` is supplied. These preparation stages do not call an
-LLM, interpret support, detect gaps or contradictions, write final Markdown reports,
-or approve a project.
+creates deterministic evidence packs, and, unless ``--no-llm`` is used, runs
+bounded LLM review over selected evidence. It still does not write the final
+human-readable project evidence report or approve a project.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from project_evidence_review_agent.evidence_index import (
 from project_evidence_review_agent.evidence_pack_markdown import (
     write_evidence_pack_markdown,
 )
+from project_evidence_review_agent.follow_up_analysis import run_follow_up_analysis
 from project_evidence_review_agent.llm_client import (
     DEFAULT_LLM_MODEL,
     LLMConfigurationError,
@@ -62,9 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="project-evidence-review",
         description=(
-            "Write trace artifacts for a bounded project evidence review "
-            "workflow. Local sources can be inventoried, indexed, and retrieved, "
-            "but not reviewed."
+            "Build deterministic evidence packs and, unless --no-llm is used, "
+            "run bounded LLM review over selected evidence."
         ),
     )
     parser.add_argument(
@@ -103,7 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm-model",
         default=DEFAULT_LLM_MODEL,
-        help=f"LLM model for bounded claim review. Default: {DEFAULT_LLM_MODEL}.",
+        help=(
+            f"LLM model for bounded claim review and follow-up analysis. "
+            f"Default: {DEFAULT_LLM_MODEL}."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -153,6 +155,18 @@ def main(
     claim_count = 0
     rejected_claim_count = 0
     validator_message_count = 0
+    missing_evidence_written = False
+    missing_evidence_path = None
+    missing_evidence_status = "not_performed"
+    missing_evidence_validation_status = "not_performed"
+    missing_evidence_count = 0
+    rejected_missing_evidence_count = 0
+    contradiction_log_written = False
+    contradiction_log_path = None
+    contradiction_detection_status = "not_performed"
+    contradiction_validation_status = "not_performed"
+    contradiction_candidate_count = 0
+    rejected_contradiction_count = 0
 
     if args.sources is not None:
         try:
@@ -187,6 +201,8 @@ def main(
             )
             if args.no_llm:
                 llm_review_status = "skipped_no_llm"
+                missing_evidence_status = "skipped_no_llm"
+                contradiction_detection_status = "skipped_no_llm"
             else:
                 llm_safe_context = build_llm_safe_review_context(
                     retrieval_summary.evidence_pack_payload
@@ -205,6 +221,8 @@ def main(
                 except LLMConfigurationError as exc:
                     llm_review_status = "failed"
                     claim_review_validation_status = "not_validated"
+                    missing_evidence_status = "skipped_claim_review_failed"
+                    contradiction_detection_status = "skipped_claim_review_failed"
                     print(
                         f"error: LLM claim review requested but not configured: {exc} "
                         "Rerun with --no-llm for deterministic evidence-pack mode.",
@@ -228,6 +246,43 @@ def main(
                     validator_message_count = (
                         claim_review_result.validator_message_count
                     )
+                    if claim_review_validation_status == "passed":
+                        follow_up_result = run_follow_up_analysis(
+                            llm_context=llm_safe_context,
+                            claim_review=claim_review_result.payload,
+                            client=client,
+                            model=args.llm_model,
+                            output_dir=args.output_dir,
+                        )
+                        missing_evidence_written = True
+                        missing_evidence_path = follow_up_result.missing_evidence_path
+                        missing_evidence_status = (
+                            follow_up_result.missing_evidence_status
+                        )
+                        missing_evidence_validation_status = (
+                            follow_up_result.missing_validation_status
+                        )
+                        missing_evidence_count = follow_up_result.missing_count
+                        rejected_missing_evidence_count = (
+                            follow_up_result.rejected_missing_count
+                        )
+                        contradiction_log_written = True
+                        contradiction_log_path = follow_up_result.contradiction_log_path
+                        contradiction_detection_status = (
+                            follow_up_result.contradiction_status
+                        )
+                        contradiction_validation_status = (
+                            follow_up_result.contradiction_validation_status
+                        )
+                        contradiction_candidate_count = (
+                            follow_up_result.contradiction_count
+                        )
+                        rejected_contradiction_count = (
+                            follow_up_result.rejected_contradiction_count
+                        )
+                    else:
+                        missing_evidence_status = "skipped_claim_review_failed"
+                        contradiction_detection_status = "skipped_claim_review_failed"
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -298,6 +353,18 @@ def main(
             claim_count=claim_count,
             rejected_claim_count=rejected_claim_count,
             validator_message_count=validator_message_count,
+            missing_evidence_written=missing_evidence_written,
+            missing_evidence_path=missing_evidence_path,
+            missing_evidence_status=missing_evidence_status,
+            missing_evidence_validation_status=missing_evidence_validation_status,
+            missing_evidence_count=missing_evidence_count,
+            rejected_missing_evidence_count=rejected_missing_evidence_count,
+            contradiction_log_written=contradiction_log_written,
+            contradiction_log_path=contradiction_log_path,
+            contradiction_detection_status=contradiction_detection_status,
+            contradiction_validation_status=contradiction_validation_status,
+            contradiction_candidate_count=contradiction_candidate_count,
+            rejected_contradiction_count=rejected_contradiction_count,
         )
     except OSError as exc:
         print(
@@ -306,9 +373,25 @@ def main(
         )
         return 1
 
+    if args.sources is not None and not args.no_llm:
+        if claim_review_written:
+            print(f"Wrote claim review: {claim_review_path}")
+        if missing_evidence_written:
+            print(f"Wrote missing evidence: {missing_evidence_path}")
+        if contradiction_log_written:
+            print(f"Wrote contradiction log: {contradiction_log_path}")
     print(f"Wrote project evidence trace: {trace_path}")
-    if args.sources is not None and not args.no_llm and (
-        llm_review_status == "failed" or claim_review_validation_status == "failed"
+    if (
+        args.sources is not None
+        and not args.no_llm
+        and (
+            llm_review_status == "failed"
+            or claim_review_validation_status == "failed"
+            or missing_evidence_status == "failed"
+            or missing_evidence_validation_status == "failed"
+            or contradiction_detection_status == "failed"
+            or contradiction_validation_status == "failed"
+        )
     ):
         return 1
     return 0

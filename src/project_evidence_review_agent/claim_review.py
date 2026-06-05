@@ -319,7 +319,8 @@ def _claim_review_payload(
 
 
 def _validate_claim(
-    claim: dict[str, Any], *, allowed: set[str], claim_ref: str) -> list[str]:
+    claim: dict[str, Any], *, allowed: set[str], claim_ref: str
+) -> list[str]:
     messages: list[str] = []
     for field in REQUIRED_CLAIM_FIELDS:
         if field not in claim:

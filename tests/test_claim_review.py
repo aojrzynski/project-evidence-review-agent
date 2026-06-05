@@ -8,20 +8,30 @@ from project_evidence_review_agent.claim_review import (
     run_claim_review,
 )
 from project_evidence_review_agent.cli import main
+from project_evidence_review_agent.contradictions import CONTRADICTION_LOG_FILE_NAME
 from project_evidence_review_agent.llm_context import (
     LLM_SAFE_REVIEW_CONTEXT_FILE_NAME,
     build_llm_safe_review_context,
 )
+from project_evidence_review_agent.missing_evidence import MISSING_EVIDENCE_FILE_NAME
 from project_evidence_review_agent.trace import TRACE_FILE_NAME
 
 
 class FakeReviewClient:
     def __init__(
-        self, response: str | None = None, *, error: Exception | None = None
+        self,
+        response: str | None = None,
+        *,
+        error: Exception | None = None,
+        follow_up_response: str | None = None,
     ) -> None:
         self.response = response or "{}"
+        self.follow_up_response = follow_up_response or json.dumps(
+            {"missing_evidence": [], "contradiction_candidates": []}
+        )
         self.error = error
         self.calls = 0
+        self.follow_up_calls = 0
         self.last_prompt = ""
         self.last_model = ""
 
@@ -32,6 +42,14 @@ class FakeReviewClient:
         if self.error is not None:
             raise self.error
         return self.response
+
+    def review_follow_up_analysis(self, prompt: str, *, model: str) -> str:
+        self.follow_up_calls += 1
+        self.last_prompt = prompt
+        self.last_model = model
+        if self.error is not None:
+            raise self.error
+        return self.follow_up_response
 
 
 def test_valid_fake_llm_response_writes_valid_claim_review(tmp_path: Path) -> None:
@@ -49,6 +67,7 @@ def test_valid_fake_llm_response_writes_valid_claim_review(tmp_path: Path) -> No
     assert payload["claims"][0]["evidence_ids"] == ["EV-0001"]
     assert payload["allowed_evidence_ids"] == ["EV-0001"]
     assert client.calls == 1
+    assert client.follow_up_calls == 0
     assert "EV-0001" in client.last_prompt
 
 
@@ -154,10 +173,15 @@ def test_cli_no_llm_does_not_call_fake_client_or_write_claim_review(
     trace = json.loads((output_dir / TRACE_FILE_NAME).read_text("utf-8"))
     assert exit_code == 0
     assert client.calls == 0
+    assert client.follow_up_calls == 0
     assert not (output_dir / CLAIM_REVIEW_FILE_NAME).exists()
+    assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
     assert not (output_dir / LLM_SAFE_REVIEW_CONTEXT_FILE_NAME).exists()
     assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["claim_review_validation_status"] == "not_performed"
+    assert trace["missing_evidence_status"] == "skipped_no_llm"
+    assert trace["contradiction_detection_status"] == "skipped_no_llm"
 
 
 def test_cli_fake_llm_writes_context_claim_review_and_trace(tmp_path: Path) -> None:
@@ -186,6 +210,7 @@ def test_cli_fake_llm_writes_context_claim_review_and_trace(tmp_path: Path) -> N
     review = json.loads((output_dir / CLAIM_REVIEW_FILE_NAME).read_text("utf-8"))
     assert exit_code == 0
     assert client.calls == 1
+    assert client.follow_up_calls == 1
     assert context["allowed_evidence_ids"] == ["EV-0001"]
     assert review["validation_status"] == "passed"
     assert review["claims"][0]["evidence_ids"] == ["EV-0001"]
@@ -194,8 +219,12 @@ def test_cli_fake_llm_writes_context_claim_review_and_trace(tmp_path: Path) -> N
     assert trace["claim_count"] == 1
     assert trace["rejected_claim_count"] == 0
     assert trace["validator_message_count"] == 0
-    assert trace["missing_evidence_detection_status"] == "not_performed"
-    assert trace["contradiction_detection_status"] == "not_performed"
+    assert (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert trace["missing_evidence_detection_status"] == "completed"
+    assert trace["missing_evidence_validation_status"] == "passed"
+    assert trace["contradiction_detection_status"] == "completed"
+    assert trace["contradiction_validation_status"] == "passed"
     assert trace["project_evidence_markdown_report_status"] == "not_performed"
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
@@ -228,6 +257,58 @@ def test_cli_validation_failure_writes_failed_artifact_and_trace(
     assert trace["llm_review_status"] == "completed"
     assert trace["claim_review_validation_status"] == "failed"
     assert trace["rejected_claim_count"] == 1
+    assert trace["missing_evidence_status"] == "skipped_claim_review_failed"
+    assert trace["contradiction_detection_status"] == "skipped_claim_review_failed"
+    assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+
+
+def test_cli_follow_up_validation_failure_writes_failed_artifacts_and_trace(
+    tmp_path: Path,
+) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack")
+    output_dir = tmp_path / "out"
+    follow_up = {
+        "missing_evidence": [
+            {
+                "gap_type": "evidence_unclear",
+                "summary": "The selected evidence is unclear.",
+                "details": "No related evidence IDs were cited for an unclear gap.",
+                "related_claim_ids": ["CL-0001"],
+                "related_evidence_ids": [],
+                "suggested_human_check": "Check the test records.",
+                "why_it_matters": "A human should inspect the evidence boundary.",
+                "confidence": "medium",
+            }
+        ],
+        "contradiction_candidates": [],
+    }
+
+    exit_code = main(
+        [
+            "--sources",
+            str(sources),
+            "--question",
+            "What evidence shows testing is complete?",
+            "--output-dir",
+            str(output_dir),
+        ],
+        review_client=FakeReviewClient(
+            json.dumps(_valid_response()), follow_up_response=json.dumps(follow_up)
+        ),
+    )
+
+    trace = json.loads((output_dir / TRACE_FILE_NAME).read_text("utf-8"))
+    missing = json.loads((output_dir / MISSING_EVIDENCE_FILE_NAME).read_text("utf-8"))
+    contradiction = json.loads(
+        (output_dir / CONTRADICTION_LOG_FILE_NAME).read_text("utf-8")
+    )
+    assert exit_code == 1
+    assert missing["validation_status"] == "failed"
+    assert contradiction["validation_status"] == "passed"
+    assert trace["missing_evidence_validation_status"] == "failed"
+    assert trace["contradiction_validation_status"] == "passed"
+    assert trace["rejected_missing_evidence_count"] == 1
 
 
 def _valid_response() -> dict[str, object]:

@@ -1,4 +1,4 @@
-"""LLM client boundary for bounded claim review.
+"""LLM client boundary for bounded claim and follow-up review.
 
 The default workflow can use an LLM, but deterministic package import and tests must
 not require OpenAI. This module defines a small protocol that fake test clients can
@@ -24,6 +24,9 @@ class ReviewLLMClient(Protocol):
 
     def review_claims(self, prompt: str, *, model: str) -> str:
         """Return model text for a bounded claim-review prompt."""
+
+    def review_follow_up_analysis(self, prompt: str, *, model: str) -> str:
+        """Return model text for bounded missing evidence/contradiction analysis."""
 
 
 class OpenAIReviewClient:
@@ -53,6 +56,14 @@ class OpenAIReviewClient:
     def review_claims(self, prompt: str, *, model: str) -> str:
         """Call the Responses API with no tools and return output text."""
 
+        return self._create_response(prompt, model=model)
+
+    def review_follow_up_analysis(self, prompt: str, *, model: str) -> str:
+        """Call the Responses API for bounded follow-up analysis with no tools."""
+
+        return self._create_response(prompt, model=model)
+
+    def _create_response(self, prompt: str, *, model: str) -> str:
         response = self._client.responses.create(model=model, input=prompt)
         output_text = getattr(response, "output_text", None)
         if isinstance(output_text, str):

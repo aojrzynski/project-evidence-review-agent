@@ -9,8 +9,8 @@ folders.
 Saving ``llm_safe_review_context.json`` makes the LLM input auditable: a human can
 inspect exactly which evidence IDs the model was allowed to use before reading any
 claim review. The saved context is review material only. It does not approve a
-project, certify readiness, replace governance, detect missing evidence as a
-separate workflow stage, or detect contradictions as a separate workflow stage.
+project, certify readiness, replace governance, or make missing evidence or
+contradiction candidates final findings.
 """
 
 from __future__ import annotations
@@ -64,7 +64,10 @@ CONTEXT_LIMIT_NOTES = [
         "Unsupported files, unselected chunks, full inventories, and raw "
         "project folders are excluded."
     ),
-    "Missing evidence and contradiction detection are future workflow stages.",
+    (
+        "Missing evidence and contradiction candidates are follow-up review "
+        "material, not final findings."
+    ),
 ]
 
 
