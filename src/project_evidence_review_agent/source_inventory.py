@@ -15,10 +15,12 @@ authority over project claims and decisions.
 from __future__ import annotations
 
 import csv
+import hashlib
 import importlib
 import importlib.util
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +166,7 @@ def _build_record(source_id: str, path: Path, root: Path) -> dict[str, Any]:
         "extension": extension,
         "source_type": _source_type(extension),
         "size_bytes": _safe_size(path),
+        **_source_fingerprint(path),
     }
 
     if extension not in SUPPORTED_EXTENSIONS:
@@ -359,3 +362,33 @@ def _bounded_preview(text: str) -> str:
     if len(compact) <= PREVIEW_CHARACTER_LIMIT:
         return compact
     return f"{compact[:PREVIEW_CHARACTER_LIMIT]}…"
+
+
+def _source_fingerprint(path: Path) -> dict[str, Any]:
+    """Return lightweight file-version metadata without making audit claims.
+
+    SHA-256 and filesystem modified time help later artifacts show which local
+    file version was used. These values improve traceability, but they do not
+    certify authenticity and should not block normal use if metadata cannot be
+    read.
+    """
+
+    fingerprint: dict[str, Any] = {"fingerprint_status": "unavailable"}
+    try:
+        stat = path.stat()
+        sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        fingerprint["fingerprint_warning"] = f"fingerprint unavailable: {exc}"
+        return fingerprint
+
+    fingerprint.update(
+        {
+            "sha256": sha256,
+            "modified_time_ns": stat.st_mtime_ns,
+            "modified_time_utc": datetime.fromtimestamp(
+                stat.st_mtime, UTC
+            ).isoformat(),
+            "fingerprint_status": "recorded",
+        }
+    )
+    return fingerprint

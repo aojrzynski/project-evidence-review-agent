@@ -8,6 +8,11 @@ import pytest
 from project_evidence_review_agent import __version__
 from project_evidence_review_agent.cli import main
 from project_evidence_review_agent.evidence_index import EVIDENCE_INDEX_FILE_NAME
+from project_evidence_review_agent.retrieval import (
+    EVIDENCE_PACK_FILE_NAME,
+    RETRIEVAL_TRACE_FILE_NAME,
+)
+from project_evidence_review_agent.review_question import REVIEW_QUESTION_FILE_NAME
 from project_evidence_review_agent.source_inventory import SOURCE_INVENTORY_FILE_NAME
 from project_evidence_review_agent.trace import TRACE_FILE_NAME
 
@@ -22,6 +27,7 @@ def test_cli_help_works(capsys: pytest.CaptureFixture[str]) -> None:
     assert "--question" in output
     assert "--output-dir" in output
     assert "--sources" in output
+    assert "--max-chunks" in output
 
 
 def test_cli_version_works(capsys: pytest.CaptureFixture[str]) -> None:
@@ -59,6 +65,9 @@ def test_cli_works_without_sources_preserving_scaffold_boundary(tmp_path: Path) 
     assert trace["llm_review_status"] == "not_performed"
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
+    assert trace["review_question_written"] is False
+    assert trace["retrieval_trace_written"] is False
+    assert trace["evidence_pack_written"] is False
     assert "no retrieval" in trace["scaffold_note"]
     assert "no LLM review was performed" in trace["scaffold_note"]
     assert "Human review remains the final authority" in trace["authority_boundary"]
@@ -88,6 +97,9 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert inventory_path.exists()
     assert evidence_index_path.exists()
     assert trace_path.exists()
+    assert (output_dir / REVIEW_QUESTION_FILE_NAME).exists()
+    assert (output_dir / RETRIEVAL_TRACE_FILE_NAME).exists()
+    assert (output_dir / EVIDENCE_PACK_FILE_NAME).exists()
 
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     evidence_index = json.loads(evidence_index_path.read_text(encoding="utf-8"))
@@ -102,11 +114,156 @@ def test_cli_with_sources_writes_inventory_evidence_index_and_trace_counts(
     assert trace["skipped_source_count"] == 1
     assert trace["evidence_chunk_count"] == evidence_index["summary"]["evidence_chunks"]
     assert trace["chunking_status"] == "completed"
-    assert trace["retrieval_status"] == "not_performed"
-    assert trace["evidence_pack_status"] == "not_performed"
+    assert trace["review_question_written"] is True
+    assert trace["retrieval_trace_written"] is True
+    assert trace["evidence_pack_written"] is True
+    assert trace["retrieval_status"] == "completed"
+    assert trace["evidence_pack_status"] == "completed"
     assert trace["llm_review_status"] == "not_performed"
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
+    assert trace["missing_evidence_detection_status"] == "not_performed"
+    assert trace["contradiction_detection_status"] == "not_performed"
+    assert trace["markdown_report_status"] == "not_performed"
+    assert trace["max_chunks"] == 10
+
+
+def test_review_question_retrieval_and_evidence_pack_artifacts(tmp_path: Path) -> None:
+    question = "Is the project ready for go-live testing release risks?"
+    sources = _write_source_pack(tmp_path / "project_pack")
+    output_dir = tmp_path / "retrieval_run"
+
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                question,
+                "--max-chunks",
+                "3",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    review_question = _read_json(output_dir / REVIEW_QUESTION_FILE_NAME)
+    retrieval_trace = _read_json(output_dir / RETRIEVAL_TRACE_FILE_NAME)
+    evidence_pack = _read_json(output_dir / EVIDENCE_PACK_FILE_NAME)
+    trace = _read_json(output_dir / TRACE_FILE_NAME)
+
+    assert review_question["question"] == question
+    assert "go-live" in review_question["question_terms"]
+    assert retrieval_trace["question"] == question
+    assert retrieval_trace["max_chunks"] == 3
+    assert 0 < retrieval_trace["selected_chunk_count"] <= 3
+    assert (
+        evidence_pack["selected_chunk_count"]
+        == retrieval_trace["selected_chunk_count"]
+    )
+    assert (
+        trace["selected_evidence_chunk_count"]
+        == evidence_pack["selected_chunk_count"]
+    )
+
+    selected = retrieval_trace["selected_chunks"]
+    assert any("go-live" in chunk["matched_terms"] for chunk in selected)
+    assert all(chunk["scoring_reasons"] for chunk in selected)
+    assert all(chunk["evidence_id"].startswith("EV-") for chunk in selected)
+    assert all(chunk["source_id"].startswith("SRC-") for chunk in selected)
+
+    pack_chunks = evidence_pack["selected_chunks"]
+    assert all(chunk["text"] for chunk in pack_chunks)
+    assert all(chunk["evidence_id"] and chunk["source_id"] for chunk in pack_chunks)
+    assert any(
+        "start_line" in chunk or "start_row" in chunk for chunk in pack_chunks
+    )
+    assert "unsupported_document.pdf" not in {
+        chunk["source_file_name"] for chunk in pack_chunks
+    }
+    assert evidence_pack["source_map"]
+
+
+def test_max_chunks_rejects_non_positive_values(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--question", "Q", "--max-chunks", "0", "--output-dir", str(output_dir)])
+
+    assert exc_info.value.code == 2
+    assert "--max-chunks must be a positive integer" in capsys.readouterr().err
+
+
+def test_retrieval_is_deterministic_across_repeated_runs(tmp_path: Path) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack")
+    first_output = tmp_path / "out1"
+    second_output = tmp_path / "out2"
+    question = "go-live testing risks release"
+
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                question,
+                "--output-dir",
+                str(first_output),
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                question,
+                "--output-dir",
+                str(second_output),
+            ]
+        )
+        == 0
+    )
+
+    first_trace = _read_json(first_output / RETRIEVAL_TRACE_FILE_NAME)
+    second_trace = _read_json(second_output / RETRIEVAL_TRACE_FILE_NAME)
+    first_pack = _read_json(first_output / EVIDENCE_PACK_FILE_NAME)
+    second_pack = _read_json(second_output / EVIDENCE_PACK_FILE_NAME)
+    assert first_trace == second_trace
+    assert first_pack == second_pack
+
+
+def test_source_fingerprints_present_for_loaded_files(tmp_path: Path) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack")
+    output_dir = tmp_path / "out"
+
+    assert (
+        main(
+            [
+                "--sources",
+                str(sources),
+                "--question",
+                "testing",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    inventory = _read_json(output_dir / SOURCE_INVENTORY_FILE_NAME)
+    loaded = [record for record in inventory["records"] if record["status"] == "loaded"]
+    assert loaded
+    assert all(record["fingerprint_status"] == "recorded" for record in loaded)
+    assert all(record["sha256"] for record in loaded)
+    chunks = _read_evidence_index(output_dir)["chunks"]
+    assert all(chunk["source_consistency_status"] == "consistent" for chunk in chunks)
 
 
 def test_supported_source_types_are_loaded(tmp_path: Path) -> None:
@@ -359,14 +516,16 @@ def _write_source_pack(path: Path) -> Path:
         encoding="utf-8",
     )
     (path / "testing_notes.txt").write_text(
-        "Testing notes\nSmoke passed.\nRegression pending human review.\n",
+        "Testing notes\n"
+        "Smoke testing passed for release.\n"
+        "Regression pending human review before go-live.\n",
         encoding="utf-8",
     )
     (path / "release_summary.json").write_text(
         json.dumps(
             {
-                "release": "demo",
-                "readiness_notes": ["synthetic note", "human review required"],
+                "release": "demo go-live",
+                "readiness_notes": ["synthetic release note", "human review required"],
                 "ready_for_review": True,
             }
         )
@@ -378,11 +537,17 @@ def _write_source_pack(path: Path) -> Path:
         encoding="utf-8",
     )
     (path / "risk_log.csv").write_text(
-        "risk_id,description\nR-001,Synthetic risk\nR-002,Second synthetic risk\n",
+        "risk_id,description\n"
+        "R-001,Synthetic go-live risk\n"
+        "R-002,Second synthetic release risk\n",
         encoding="utf-8",
     )
     (path / "unsupported_document.pdf").write_text("unsupported", encoding="utf-8")
     return path
+
+
+def _read_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _records_by_file_name(inventory_path: Path) -> dict[str, dict[str, object]]:

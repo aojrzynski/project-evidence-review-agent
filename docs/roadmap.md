@@ -7,7 +7,7 @@ This roadmap keeps early work narrow and reviewable. Each step should preserve t
 1. **PR #1 repo scaffold** — create the package, CLI, trace stub, tests, linting, CI, and documentation.
 2. **PR #2 local source inventory and intake** — add `--sources`, inspect one local file or directory, load supported Markdown, text, JSON, YAML, and CSV files for bounded metadata, skip unsupported files with reasons, write `source_inventory.json`, and keep the trace explicit that no evidence review has happened.
 3. **PR #3 chunking and evidence index** — split loaded supported local sources into bounded chunks, assign stable `EV-0001`-style evidence IDs, preserve source references plus line or row references where practical, and write `evidence_index.json` without retrieval or review.
-4. **PR #4 review question and retrieval** — connect review questions to bounded local evidence candidates.
+4. **PR #4 review question and retrieval** — record the supplied review question, run deterministic keyword retrieval over evidence chunks, explain selected chunks in `retrieval_trace.json`, and write bounded `evidence_pack.json` without reviewing claims.
 5. **PR #5 deterministic evidence pack Markdown** — write a human-readable evidence pack before any LLM review.
 6. **PR #6 bounded LLM claim review** — add an LLM-default review step that reasons only over supplied evidence and cites evidence IDs.
 7. **PR #7 missing evidence and contradiction detection** — identify gaps and possible contradictions for human review.
@@ -15,8 +15,8 @@ This roadmap keeps early work narrow and reviewable. Each step should preserve t
 9. **PR #9 LangGraph orchestration, if still appropriate** — add graph orchestration only if the workflow benefits from it.
 10. **PR #10 docs, examples, comments, and release polish** — improve examples, comments, and release readiness without expanding the authority boundary.
 
-## Current PR #3 boundary
+## Current PR #4 boundary
 
-PR #3 adds deterministic evidence indexing after source inventory. It records supplied local material, skip reasons, bounded evidence chunks, stable evidence IDs, source references, and line or row references where practical.
+PR #4 records the supplied review question, retrieves lexically relevant chunks from the deterministic evidence index, explains retrieval choices, and writes a bounded JSON evidence pack for later Markdown reporting and LLM review. It also carries lightweight source fingerprints where practical so humans can see which local file version supplied selected evidence.
 
-Evidence indexing is still preparation only. It does not retrieve evidence for the question, build an evidence pack, call an LLM, interpret claims, detect missing evidence, detect contradictions, write a final report, or produce readiness, compliance, certification, approval, or go-live decisions.
+Retrieval is still preparation only. It does not decide whether a claim is supported, detect missing evidence, detect contradictions, call an LLM, write a Markdown evidence pack, write a final report, or produce readiness, compliance, certification, approval, or go-live decisions. A selected chunk means keyword relevance, not proof or completeness.

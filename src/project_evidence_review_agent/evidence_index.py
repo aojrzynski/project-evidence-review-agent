@@ -20,10 +20,12 @@ source reference is enough.
 from __future__ import annotations
 
 import csv
+import hashlib
 import importlib
 import importlib.util
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,9 +74,23 @@ def build_evidence_index(
     )
 
     chunks_without_ids: list[dict[str, Any]] = []
+    source_consistency_warnings: list[dict[str, Any]] = []
     for record in loaded_records:
         source_file = _source_file_path(resolved_sources_path, record)
-        chunks_without_ids.extend(_chunk_loaded_source(record, source_file))
+        consistency = _source_consistency(record, source_file)
+        if consistency.get("source_consistency_warning"):
+            source_consistency_warnings.append(
+                {
+                    "source_id": record.get("source_id"),
+                    "source_path": record.get("path"),
+                    "warning": consistency["source_consistency_warning"],
+                }
+            )
+        chunks_without_ids.extend(
+            _chunk_loaded_source(
+                record=record, path=source_file, consistency=consistency
+            )
+        )
 
     chunks = [
         {"evidence_id": f"EV-{index:04d}", **chunk}
@@ -98,6 +114,8 @@ def build_evidence_index(
             "skipped_sources_excluded": inventory.get("summary", {}).get(
                 "skipped_sources", 0
             ),
+            "source_fingerprint_warning_count": len(source_consistency_warnings),
+            "source_consistency_warnings": source_consistency_warnings[:25],
         },
         "boundary_note": (
             "Evidence indexing creates bounded local source chunks for later citation. "
@@ -107,13 +125,17 @@ def build_evidence_index(
 
 
 def write_evidence_index(
-    inventory: dict[str, Any], sources_path: Path, output_dir: Path
+    inventory: dict[str, Any],
+    sources_path: Path,
+    output_dir: Path,
+    evidence_index: dict[str, Any] | None = None,
 ) -> EvidenceIndexSummary:
     """Write ``evidence_index.json`` and return counts for the trace."""
 
-    evidence_index = build_evidence_index(
-        inventory=inventory, sources_path=sources_path
-    )
+    if evidence_index is None:
+        evidence_index = build_evidence_index(
+            inventory=inventory, sources_path=sources_path
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     evidence_index_path = output_dir / EVIDENCE_INDEX_FILE_NAME
     evidence_index_path.write_text(
@@ -134,18 +156,20 @@ def _source_file_path(root: Path, record: dict[str, Any]) -> Path:
     return root / str(record["path"])
 
 
-def _chunk_loaded_source(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+def _chunk_loaded_source(
+    record: dict[str, Any], path: Path, consistency: dict[str, Any]
+) -> list[dict[str, Any]]:
     source_type = str(record.get("source_type", ""))
     if source_type == "markdown":
-        return _chunk_markdown(record, path)
+        return _apply_consistency(_chunk_markdown(record, path), consistency)
     if source_type == "text":
-        return _chunk_text(record, path)
+        return _apply_consistency(_chunk_text(record, path), consistency)
     if source_type == "json":
-        return _chunk_json(record, path)
+        return _apply_consistency(_chunk_json(record, path), consistency)
     if source_type == "yaml":
-        return _chunk_yaml(record, path)
+        return _apply_consistency(_chunk_yaml(record, path), consistency)
     if source_type == "csv":
-        return _chunk_csv(record, path)
+        return _apply_consistency(_chunk_csv(record, path), consistency)
     return []
 
 
@@ -400,6 +424,10 @@ def _base_chunk(
         "char_count": len(text),
         "word_count": len(text.split()),
         "chunk_strategy": strategy,
+        "sha256": record.get("sha256"),
+        "modified_time_ns": record.get("modified_time_ns"),
+        "modified_time_utc": record.get("modified_time_utc"),
+        "fingerprint_status": record.get("fingerprint_status", "unavailable"),
     }
     if start_line is not None:
         chunk["start_line"] = start_line
@@ -461,3 +489,50 @@ def _preview(text: str) -> str:
     if len(compact) <= TEXT_PREVIEW_CHARS:
         return compact
     return f"{compact[:TEXT_PREVIEW_CHARS]}…"
+
+
+def _source_consistency(record: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Compare current file metadata with inventory metadata in a small way.
+
+    The check catches obvious same-run changes so traces can warn humans. It is
+    intentionally not a security or audit subsystem and does not block indexing.
+    """
+
+    result: dict[str, Any] = {"source_consistency_status": "not_checked"}
+    if record.get("fingerprint_status") != "recorded":
+        return {"source_consistency_status": "fingerprint_unavailable"}
+    try:
+        stat = path.stat()
+        current_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        return {
+            "source_consistency_status": "warning",
+            "source_consistency_warning": (
+                "source could not be fingerprinted during indexing: " f"{exc}"
+            ),
+        }
+
+    current_modified_utc = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
+    if (
+        current_sha256 != record.get("sha256")
+        or stat.st_mtime_ns != record.get("modified_time_ns")
+    ):
+        result.update(
+            {
+                "source_consistency_status": "warning",
+                "source_consistency_warning": (
+                    "source fingerprint changed between inventory and evidence indexing"
+                ),
+                "current_sha256": current_sha256,
+                "current_modified_time_ns": stat.st_mtime_ns,
+                "current_modified_time_utc": current_modified_utc,
+            }
+        )
+        return result
+    return {"source_consistency_status": "consistent"}
+
+
+def _apply_consistency(
+    chunks: list[dict[str, Any]], consistency: dict[str, Any]
+) -> list[dict[str, Any]]:
+    return [{**chunk, **consistency} for chunk in chunks]
