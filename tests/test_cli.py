@@ -759,6 +759,9 @@ def test_default_cli_trace_records_standard_orchestrator(tmp_path: Path) -> None
     assert trace["langgraph_available"] is None
     assert trace["graph_orchestration_status"] == "not_used"
     assert trace["graph_node_statuses"] == {}
+    assert trace["workflow_stage"] == "pr_009_optional_orchestration"
+    assert "PR #9 run with optional orchestration metadata" in trace["scaffold_note"]
+    assert "PR #8 run" not in trace["scaffold_note"]
 
 
 def test_explicit_standard_orchestrator_matches_default_artifact_names(
@@ -898,6 +901,96 @@ def test_langgraph_orchestrator_no_llm_matches_standard_when_available(
         assert standard_trace[key] == graph_trace[key]
     assert graph_trace["orchestrator"] == "langgraph"
     assert graph_trace["graph_orchestration_status"] == "completed"
+
+
+def test_langgraph_full_fake_llm_happy_path_writes_validated_artifacts(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("langgraph", reason="optional graph dependencies not installed")
+    sources = _write_source_pack(tmp_path / "project_pack_langgraph_full")
+    output_dir = tmp_path / "langgraph_full"
+    client = _FakeReviewClient(
+        json.dumps(_valid_fake_claim_response("__FIRST_ALLOWED__")),
+        follow_up_response=json.dumps(
+            {"missing_evidence": [], "contradiction_candidates": []}
+        ),
+    )
+
+    exit_code = main(
+        [
+            "--sources",
+            str(sources),
+            "--question",
+            "What evidence shows testing is complete?",
+            "--llm-model",
+            "fake-model",
+            "--orchestrator",
+            "langgraph",
+            "--output-dir",
+            str(output_dir),
+        ],
+        review_client=client,
+    )
+
+    trace = _read_json(output_dir / TRACE_FILE_NAME)
+    assert exit_code == 0
+    assert client.calls == 1
+    assert client.follow_up_calls == 1
+    assert (output_dir / CLAIM_REVIEW_FILE_NAME).exists()
+    assert (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
+    assert (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
+    assert (output_dir / TRACE_FILE_NAME).exists()
+    assert trace["orchestrator"] == "langgraph"
+    assert trace["graph_orchestration_status"] == "completed"
+    assert trace["approval_decision_status"] == "not_performed"
+    assert trace["go_live_decision_status"] == "not_performed"
+
+
+class _FakeReviewClient:
+    def __init__(
+        self,
+        response: str,
+        *,
+        follow_up_response: str,
+    ) -> None:
+        self.response = response
+        self.follow_up_response = follow_up_response
+        self.calls = 0
+        self.follow_up_calls = 0
+
+    def review_claims(self, prompt: str, *, model: str) -> str:
+        assert model == "fake-model"
+        self.calls += 1
+        response = json.loads(self.response)
+        allowed_ids = json.loads(prompt)["allowed_evidence_ids"]
+        for claim in response["claims"]:
+            if claim["evidence_ids"] == ["__FIRST_ALLOWED__"]:
+                claim["evidence_ids"] = [allowed_ids[0]]
+        return json.dumps(response)
+
+    def review_follow_up_analysis(self, _prompt: str, *, model: str) -> str:
+        assert model == "fake-model"
+        self.follow_up_calls += 1
+        return self.follow_up_response
+
+
+def _valid_fake_claim_response(evidence_id: str) -> dict[str, object]:
+    return {
+        "claims": [
+            {
+                "claim_id": "CL-0001",
+                "claim_text": "The supplied evidence contains testing material.",
+                "status": "evidence_supported",
+                "evidence_ids": [evidence_id],
+                "explanation": "The selected evidence includes a cited evidence ID.",
+                "caveats": ["This is bounded to selected local evidence."],
+            }
+        ],
+        "unsupported_or_unclear_points": [],
+        "review_caveats": ["Human review remains required."],
+        "recommended_human_checks": ["Check the cited testing evidence."],
+    }
 
 
 def _artifact_names(output_dir: Path) -> set[str]:

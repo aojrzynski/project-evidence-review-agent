@@ -10,7 +10,7 @@ semantics remain in the existing tested modules.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from project_evidence_review_agent.llm_client import ReviewLLMClient
 from project_evidence_review_agent.workflow import (
@@ -36,6 +36,14 @@ LANGGRAPH_INSTALL_MESSAGE = (
     "LangGraph orchestration requires the optional graph dependencies. "
     "Install with: pip install -e '.[graph]'"
 )
+
+
+class _GraphState(TypedDict):
+    """Mutable graph state passed between thin LangGraph nodes."""
+
+    config: WorkflowConfig
+    result: WorkflowResult
+    review_client: ReviewLLMClient | None
 
 
 class LangGraphUnavailableError(Exception):
@@ -76,7 +84,7 @@ def run_langgraph_workflow(
     )
 
     def node(name: str, func: Any) -> Any:
-        def wrapped(state: dict[str, Any]) -> dict[str, Any]:
+        def wrapped(state: _GraphState) -> _GraphState:
             state["result"].graph_node_statuses[name] = "running"
             func(state["config"], state["result"])
             state["result"].graph_node_statuses[name] = "completed"
@@ -84,7 +92,7 @@ def run_langgraph_workflow(
 
         return wrapped
 
-    def run_claim_node(state: dict[str, Any]) -> dict[str, Any]:
+    def run_claim_node(state: _GraphState) -> _GraphState:
         name = "run_claim_review"
         state["result"].graph_node_statuses[name] = "running"
         try:
@@ -97,7 +105,7 @@ def run_langgraph_workflow(
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def run_followup_node(state: dict[str, Any]) -> dict[str, Any]:
+    def run_followup_node(state: _GraphState) -> _GraphState:
         name = "run_followup_analysis"
         state["result"].graph_node_statuses[name] = "running"
         run_followup_analysis_stage(
@@ -106,28 +114,28 @@ def run_langgraph_workflow(
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def no_llm_node(state: dict[str, Any]) -> dict[str, Any]:
+    def no_llm_node(state: _GraphState) -> _GraphState:
         name = "mark_no_llm_skips"
         state["result"].graph_node_statuses[name] = "running"
         mark_no_llm_skips(state["result"])
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def claim_failed_node(state: dict[str, Any]) -> dict[str, Any]:
+    def claim_failed_node(state: _GraphState) -> _GraphState:
         name = "mark_claim_review_failure_skips"
         state["result"].graph_node_statuses[name] = "running"
         mark_claim_review_failure_skips(state["result"])
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def report_skipped_node(state: dict[str, Any]) -> dict[str, Any]:
+    def report_skipped_node(state: _GraphState) -> _GraphState:
         name = "mark_followup_report_skipped"
         state["result"].graph_node_statuses[name] = "running"
         state["result"].project_evidence_report_status = "skipped_followup_failed"
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def write_trace_node(state: dict[str, Any]) -> dict[str, Any]:
+    def write_trace_node(state: _GraphState) -> _GraphState:
         name = "write_trace"
         state["result"].graph_node_statuses[name] = "running"
         state["result"].graph_orchestration_status = "completed"
@@ -135,27 +143,27 @@ def run_langgraph_workflow(
         state["result"].graph_node_statuses[name] = "completed"
         return state
 
-    def route_after_prepare(state: dict[str, Any]) -> str:
+    def route_after_prepare(state: _GraphState) -> str:
         if state["config"].sources_path is None:
             return "write_trace"
         return "inventory_sources"
 
-    def route_after_markdown(state: dict[str, Any]) -> str:
+    def route_after_markdown(state: _GraphState) -> str:
         if state["config"].no_llm:
             return "mark_no_llm_skips"
         return "build_llm_context"
 
-    def route_after_claim_review(state: dict[str, Any]) -> str:
+    def route_after_claim_review(state: _GraphState) -> str:
         if state["result"].claim_review_validation_status == "passed":
             return "run_followup_analysis"
         return "mark_claim_review_failure_skips"
 
-    def route_after_followup(state: dict[str, Any]) -> str:
+    def route_after_followup(state: _GraphState) -> str:
         if followup_passed(state["result"]):
             return "write_project_report"
         return "mark_followup_report_skipped"
 
-    workflow = StateGraph(dict)
+    workflow = StateGraph(_GraphState)
     workflow.add_node("prepare_output", node("prepare_output", prepare_output))
     workflow.add_node("inventory_sources", node("inventory_sources", inventory_sources))
     workflow.add_node(

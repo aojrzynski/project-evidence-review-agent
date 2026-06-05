@@ -32,7 +32,8 @@ AUTHORITY_BOUNDARY = (
     "decisions. Human review remains the final authority."
 )
 SCAFFOLD_NOTE = (
-    "PR #8 run: source inventory and evidence indexing may prepare bounded "
+    "PR #9 run with optional orchestration metadata: source inventory and "
+    "evidence indexing may prepare bounded "
     "local chunks, deterministic retrieval may select lexical matches for an "
     "evidence pack, optional bounded LLM claim review may validate cited "
     "claim output, follow-up analysis may write validated missing evidence "
@@ -116,7 +117,7 @@ def build_trace(
         "review_question": question,
         "output_directory": str(output_dir),
         "supplied_sources_path": str(sources_path) if sources_path else None,
-        "workflow_stage": "pr_008_project_evidence_report",
+        "workflow_stage": "pr_009_optional_orchestration",
         "workflow_status": _workflow_status(
             evidence_pack_markdown_written=evidence_pack_markdown_written,
             llm_review_status=llm_review_status,
