@@ -21,6 +21,9 @@ project-evidence-review = "project_evidence_review_agent.cli:main"
 llm = [
   "openai>=1.82",
 ]
+graph = [
+  "langgraph>=0.2.70",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
