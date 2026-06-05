@@ -1,3 +1,10 @@
 Synthetic testing notes only.
 
-Smoke tests passed in a local fake environment. Load testing is not complete.
+Smoke testing
+Smoke tests passed in a local fake environment.
+
+Regression testing
+A short regression checklist was run against synthetic data. One follow-up item remains open for a human reviewer.
+
+Load testing
+Load testing is not complete. This note is not a go-live decision.

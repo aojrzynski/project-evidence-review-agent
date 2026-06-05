@@ -1,3 +1,4 @@
 risk_id,description,owner,status
 R-001,Synthetic dependency may not be ready,Example Owner,open
 R-002,Rollback rehearsal is incomplete,Example Owner,monitoring
+R-003,Support handoff needs human confirmation,Example Owner,open
