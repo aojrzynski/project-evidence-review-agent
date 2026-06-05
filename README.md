@@ -8,20 +8,20 @@ It does not approve projects, certify readiness, replace governance, or make leg
 
 Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, prepare small source references, and select a bounded set of chunks that match the review question.
 
-PR #4 records the supplied review question and performs deterministic retrieval over the evidence index. Retrieval means keyword-based selection of chunks that appear lexically relevant to the question. Retrieval is not review. A selected chunk does not automatically support or contradict a claim, and a high retrieval score does not mean the evidence is complete or that a project is ready.
+PR #5 records the supplied review question, performs deterministic retrieval over the evidence index, writes `evidence_pack.json`, and renders the same payload as `evidence_pack.md`. Retrieval means keyword-based selection of chunks that appear lexically relevant to the question. Retrieval is not review. A selected chunk does not automatically support or contradict a claim, and a high retrieval score does not mean the evidence is complete or that a project is ready.
 
 ## Deterministic evidence packs and LLM review
 
 The planned workflow has two different layers:
 
-1. **Deterministic evidence-pack building** inspects supplied local sources, inventories them, chunks them, retrieves relevant passages, and writes bounded JSON evidence packs. This layer is reproducible and inspectable.
+1. **Deterministic evidence-pack building** inspects supplied local sources, inventories them, chunks them, retrieves relevant passages, and writes bounded JSON evidence packs and readable Markdown views. This layer is reproducible and inspectable.
 2. **LLM review** will later reason over the bounded evidence pack. The full future review workflow is LLM-default, but the model must reason only over supplied evidence and cite evidence IDs when assessing claims.
 
 A later `--no-llm` mode should mean evidence-pack-only. It should not mean a full review without the model. In that mode, the tool should stop after producing deterministic evidence artifacts for a human or separate review step.
 
-## What PR #4 currently does
+## What PR #5 currently does
 
-PR #4 provides local source inventory, deterministic evidence indexing, review question recording, deterministic retrieval, and a bounded JSON evidence pack:
+PR #5 provides local source inventory, deterministic evidence indexing, review question recording, deterministic retrieval, a bounded JSON evidence pack, and a deterministic Markdown rendering of that same pack:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
@@ -40,13 +40,14 @@ PR #4 provides local source inventory, deterministic evidence indexing, review q
 - Writes `review_question.json` to record the supplied question and normalized terms.
 - Writes `retrieval_trace.json` to explain selected chunks, matched terms, and scoring reasons.
 - Writes `evidence_pack.json` with the bounded selected chunks for later reporting and LLM review.
+- Writes `evidence_pack.md` as a human-readable view rendered from the same `evidence_pack.json` payload.
 - Continues writing `project_evidence_trace.json`.
-- Records that no LLM review, missing evidence detection, contradiction detection, Markdown report, or approval decision happened.
+- Records that no LLM review, missing evidence detection, contradiction detection, final project evidence report, or approval decision happened.
 - Adds synthetic example project material, tests, Ruff configuration, and CI-ready checks.
 
 ## Supported source file types
 
-PR #4 supports these extensions:
+PR #5 supports these extensions:
 
 - `.md`
 - `.txt`
@@ -141,7 +142,7 @@ The trace may say which chunks matched terms and why they were selected. It must
 
 ## What `evidence_pack.json` contains
 
-`evidence_pack.json` is the bounded JSON evidence pack for later Markdown reporting and LLM review. It includes:
+`evidence_pack.json` is the bounded machine-readable evidence pack used to render `evidence_pack.md` and support later LLM review. It includes:
 
 - The review question.
 - Retrieval strategy.
@@ -155,9 +156,8 @@ The evidence pack does not include unsupported skipped files as evidence, does n
 
 ## What is not implemented yet
 
-PR #4 deliberately does not:
+PR #5 deliberately does not:
 
-- Create `evidence_pack.md`.
 - Create `project_evidence_report.md`.
 - Call an LLM.
 - Add OpenAI, LangGraph, embeddings, vector databases, or external connectors.
@@ -168,7 +168,24 @@ PR #4 deliberately does not:
 - Produce a final project evidence report.
 - Produce readiness, approval, compliance, privacy, security, certification, or go-live verdicts.
 
-Full review mode will come later, after deterministic source intake, chunking, retrieval, and evidence-pack artifacts are in place.
+Full review mode will come later, after deterministic source intake, chunking, retrieval, and evidence-pack Markdown artifacts are in place.
+
+## What to open first
+
+When `--sources` is supplied, open `evidence_pack.md` first if you want a readable review-preparation artifact. It shows the review question, how the pack was built, selected evidence chunks, source references, matched terms, retrieval scores, a source map, limitations, and deterministic next steps.
+
+Open `evidence_pack.json` when you need the machine-readable payload for tests, automation, or future bounded LLM review. The Markdown is rendered from the same payload that is written to `evidence_pack.json`; it does not re-run retrieval or introduce a second source of truth.
+
+`evidence_pack.md` is different from the future `project_evidence_report.md`. The evidence pack is preparation: it shows selected lexical matches and source references. The future report will be a later artifact that separates evidence, missing evidence, possible contradictions, and human checks. PR #5 does not write that final report.
+
+Important boundaries for `evidence_pack.md`:
+
+- It is deterministic and does not use an LLM.
+- It is not project approval or a go-live decision.
+- Selected evidence is not automatically supporting evidence.
+- Retrieval scores mean lexical relevance, not truth or completeness.
+- Missing evidence detection and contradiction detection do not exist yet.
+- Human review remains the final authority.
 
 ## Safety and authority boundaries
 
@@ -217,10 +234,11 @@ outputs/retrieval_run/evidence_index.json
 outputs/retrieval_run/review_question.json
 outputs/retrieval_run/retrieval_trace.json
 outputs/retrieval_run/evidence_pack.json
+outputs/retrieval_run/evidence_pack.md
 outputs/retrieval_run/project_evidence_trace.json
 ```
 
-The trace records the question, output directory, supplied source path, source inventory counts, evidence chunk counts, selected chunk count, `--max-chunks`, package version, timestamp, and authority boundary. It also confirms that no LLM review, missing evidence detection, contradiction detection, Markdown report, or approval decision happened.
+The trace records the question, output directory, supplied source path, source inventory counts, evidence chunk counts, selected chunk count, `--max-chunks`, `evidence_pack.md` path, package version, timestamp, and authority boundary. It also confirms that no LLM review, missing evidence detection, contradiction detection, final project evidence report, or approval decision happened.
 
 You can still run without `--sources` to write only the trace:
 

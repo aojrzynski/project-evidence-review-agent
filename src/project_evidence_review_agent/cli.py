@@ -3,7 +3,7 @@
 The CLI records a human review question, inventories supported local sources,
 creates a deterministic evidence index, and retrieves bounded lexically relevant
 chunks when ``--sources`` is supplied. These preparation stages do not call an
-LLM, interpret support, detect gaps or contradictions, write Markdown reports,
+LLM, interpret support, detect gaps or contradictions, write final Markdown reports,
 or approve a project.
 """
 
@@ -16,6 +16,9 @@ from pathlib import Path
 from project_evidence_review_agent.evidence_index import (
     build_evidence_index,
     write_evidence_index,
+)
+from project_evidence_review_agent.evidence_pack_markdown import (
+    write_evidence_pack_markdown,
 )
 from project_evidence_review_agent.retrieval import (
     validate_max_chunks,
@@ -106,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     review_question_written = False
     retrieval_trace_written = False
     evidence_pack_written = False
+    evidence_pack_markdown_written = False
+    evidence_pack_markdown_path = None
     loaded_source_count = 0
     skipped_source_count = 0
     evidence_chunk_count = 0
@@ -140,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
                 max_chunks=args.max_chunks,
                 output_dir=args.output_dir,
             )
+            evidence_pack_markdown_path = write_evidence_pack_markdown(
+                evidence_pack=retrieval_summary.evidence_pack_payload,
+                output_dir=args.output_dir,
+            )
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -161,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         review_question_written = True
         retrieval_trace_written = True
         evidence_pack_written = True
+        evidence_pack_markdown_written = True
         loaded_source_count = inventory_summary.loaded_count
         skipped_source_count = inventory_summary.skipped_count
         evidence_chunk_count = evidence_index_summary.chunk_count
@@ -176,7 +186,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote evidence index: {evidence_index_summary.path}")
         print(f"Wrote review question: {review_question_path}")
         print(f"Wrote retrieval trace: {retrieval_summary.retrieval_trace_path}")
-        print(f"Wrote evidence pack: {retrieval_summary.evidence_pack_path}")
+        print(f"Wrote evidence pack JSON: {retrieval_summary.evidence_pack_path}")
+        print(f"Wrote evidence pack Markdown: {evidence_pack_markdown_path}")
 
     try:
         trace_path = write_trace(
@@ -192,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
             review_question_written=review_question_written,
             retrieval_trace_written=retrieval_trace_written,
             evidence_pack_written=evidence_pack_written,
+            evidence_pack_markdown_written=evidence_pack_markdown_written,
+            evidence_pack_markdown_path=evidence_pack_markdown_path,
             selected_evidence_chunk_count=selected_evidence_chunk_count,
             max_chunks=args.max_chunks,
             source_fingerprint_warning_count=source_fingerprint_warning_count,

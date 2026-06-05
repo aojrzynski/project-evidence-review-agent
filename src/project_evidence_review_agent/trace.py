@@ -6,9 +6,9 @@ found, evidence indexing chunks loaded supported sources, and deterministic
 retrieval can select a bounded set of lexical matches for the review question.
 
 This stage still does not ask an LLM to review claims, detect missing evidence,
-detect contradictions, write a Markdown report, or produce any readiness,
-approval, legal, compliance, privacy, security, certification, or go-live
-verdict. The project protects evidence and authority boundaries by recording
+detect contradictions, write the final project evidence report, or produce any
+readiness, approval, legal, compliance, privacy, security, certification, or
+go-live verdict. The project protects evidence and authority boundaries by recording
 what happened, what did not happen, and that human review remains the final
 authority.
 """
@@ -30,12 +30,14 @@ AUTHORITY_BOUNDARY = (
     "decisions. Human review remains the final authority."
 )
 SCAFFOLD_NOTE = (
-    "PR #4 run: source inventory and evidence indexing may prepare bounded "
+    "PR #5 run: source inventory and evidence indexing may prepare bounded "
     "local chunks, and deterministic retrieval may select lexical matches for "
     "an evidence pack. Retrieval is not review: no LLM review was performed, no "
     "missing evidence detection was performed, no contradiction detection was "
-    "performed, no Markdown report was written, and no project claim or go-live "
-    "decision was approved. When sources are not supplied, no retrieval is performed."
+    "performed, no final project evidence report was written, and no project "
+    "claim or go-live decision was approved. When sources are supplied, "
+    "evidence_pack.md is deterministic review preparation only. When sources "
+    "are not supplied, no retrieval is performed."
 )
 
 
@@ -52,6 +54,8 @@ def build_trace(
     review_question_written: bool = False,
     retrieval_trace_written: bool = False,
     evidence_pack_written: bool = False,
+    evidence_pack_markdown_written: bool = False,
+    evidence_pack_markdown_path: Path | None = None,
     selected_evidence_chunk_count: int = 0,
     max_chunks: int = 10,
     source_fingerprint_warning_count: int = 0,
@@ -60,6 +64,9 @@ def build_trace(
 
     retrieval_status = "completed" if retrieval_trace_written else "not_performed"
     evidence_pack_status = "completed" if evidence_pack_written else "not_performed"
+    evidence_pack_markdown_status = (
+        "completed" if evidence_pack_markdown_written else "not_performed"
+    )
     return {
         "tool_name": TOOL_NAME,
         "package_name": "project_evidence_review_agent",
@@ -68,9 +75,9 @@ def build_trace(
         "review_question": question,
         "output_directory": str(output_dir),
         "supplied_sources_path": str(sources_path) if sources_path else None,
-        "workflow_stage": "pr_004_review_question_retrieval",
-        "workflow_status": "deterministic_retrieval_completed"
-        if retrieval_trace_written
+        "workflow_stage": "pr_005_evidence_pack_markdown",
+        "workflow_status": "deterministic_evidence_pack_markdown_completed"
+        if evidence_pack_markdown_written
         else "scaffold_trace_only",
         "artifact": TRACE_FILE_NAME,
         "source_inventory_written": source_inventory_written,
@@ -87,6 +94,11 @@ def build_trace(
         "review_question_written": review_question_written,
         "retrieval_trace_written": retrieval_trace_written,
         "evidence_pack_written": evidence_pack_written,
+        "evidence_pack_markdown_written": evidence_pack_markdown_written,
+        "evidence_pack_markdown_path": str(evidence_pack_markdown_path)
+        if evidence_pack_markdown_path
+        else None,
+        "evidence_pack_markdown_status": evidence_pack_markdown_status,
         "selected_evidence_chunk_count": selected_evidence_chunk_count,
         "max_chunks": max_chunks,
         "source_fingerprint_warning_count": source_fingerprint_warning_count,
@@ -118,6 +130,8 @@ def write_trace(
     review_question_written: bool = False,
     retrieval_trace_written: bool = False,
     evidence_pack_written: bool = False,
+    evidence_pack_markdown_written: bool = False,
+    evidence_pack_markdown_path: Path | None = None,
     selected_evidence_chunk_count: int = 0,
     max_chunks: int = 10,
     source_fingerprint_warning_count: int = 0,
@@ -139,6 +153,8 @@ def write_trace(
         review_question_written=review_question_written,
         retrieval_trace_written=retrieval_trace_written,
         evidence_pack_written=evidence_pack_written,
+        evidence_pack_markdown_written=evidence_pack_markdown_written,
+        evidence_pack_markdown_path=evidence_pack_markdown_path,
         selected_evidence_chunk_count=selected_evidence_chunk_count,
         max_chunks=max_chunks,
         source_fingerprint_warning_count=source_fingerprint_warning_count,
