@@ -14,6 +14,9 @@ from project_evidence_review_agent.llm_context import (
     build_llm_safe_review_context,
 )
 from project_evidence_review_agent.missing_evidence import MISSING_EVIDENCE_FILE_NAME
+from project_evidence_review_agent.project_report import (
+    PROJECT_EVIDENCE_REPORT_FILE_NAME,
+)
 from project_evidence_review_agent.trace import TRACE_FILE_NAME
 
 
@@ -177,6 +180,9 @@ def test_cli_no_llm_does_not_call_fake_client_or_write_claim_review(
     assert not (output_dir / CLAIM_REVIEW_FILE_NAME).exists()
     assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
     assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert not (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_no_llm"
     assert not (output_dir / LLM_SAFE_REVIEW_CONTEXT_FILE_NAME).exists()
     assert trace["llm_review_status"] == "skipped_no_llm"
     assert trace["claim_review_validation_status"] == "not_performed"
@@ -225,7 +231,15 @@ def test_cli_fake_llm_writes_context_claim_review_and_trace(tmp_path: Path) -> N
     assert trace["missing_evidence_validation_status"] == "passed"
     assert trace["contradiction_detection_status"] == "completed"
     assert trace["contradiction_validation_status"] == "passed"
-    assert trace["project_evidence_markdown_report_status"] == "not_performed"
+    assert (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
+    assert trace["project_evidence_report_written"] is True
+    assert trace["project_evidence_report_status"] == "written"
+    assert trace["project_evidence_markdown_report_status"] == "written"
+    assert trace["report_claim_count"] == 1
+    assert trace["report_missing_evidence_count"] == 0
+    assert trace["report_contradiction_candidate_count"] == 0
+    assert trace["report_human_check_count"] == 1
+    assert trace["final_report_is_not_approval"] is True
     assert trace["approval_decision_status"] == "not_performed"
     assert trace["go_live_decision_status"] == "not_performed"
 
@@ -261,6 +275,9 @@ def test_cli_validation_failure_writes_failed_artifact_and_trace(
     assert trace["contradiction_detection_status"] == "skipped_claim_review_failed"
     assert not (output_dir / MISSING_EVIDENCE_FILE_NAME).exists()
     assert not (output_dir / CONTRADICTION_LOG_FILE_NAME).exists()
+    assert not (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_claim_review_failed"
 
 
 def test_cli_follow_up_validation_failure_writes_failed_artifacts_and_trace(
@@ -309,6 +326,92 @@ def test_cli_follow_up_validation_failure_writes_failed_artifacts_and_trace(
     assert trace["missing_evidence_validation_status"] == "failed"
     assert trace["contradiction_validation_status"] == "passed"
     assert trace["rejected_missing_evidence_count"] == 1
+    assert not (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).exists()
+    assert trace["project_evidence_report_written"] is False
+    assert trace["project_evidence_report_status"] == "skipped_followup_failed"
+
+
+def test_cli_successful_full_run_report_includes_follow_up_artifacts(
+    tmp_path: Path,
+) -> None:
+    sources = _write_source_pack(tmp_path / "project_pack")
+    output_dir = tmp_path / "out"
+    follow_up = {
+        "missing_evidence": [
+            {
+                "gap_type": "evidence_not_found",
+                "summary": "A separate final sign-off record was not found.",
+                "details": (
+                    "The selected evidence mentions testing but no sign-off file."
+                ),
+                "related_claim_ids": ["CL-0001"],
+                "related_evidence_ids": [],
+                "suggested_human_check": "Check for a final sign-off record.",
+                "why_it_matters": "A human may need to inspect the evidence boundary.",
+                "confidence": "medium",
+            }
+        ],
+        "contradiction_candidates": [
+            {
+                "summary": "Testing passed while human review remained required.",
+                "evidence_side_a": {
+                    "evidence_ids": ["EV-0001"],
+                    "description": "Testing passed.",
+                },
+                "evidence_side_b": {
+                    "evidence_ids": ["EV-0001"],
+                    "description": "Human review remained required.",
+                },
+                "explanation": "A human may need to compare these statements.",
+                "related_claim_ids": ["CL-0001"],
+                "suggested_human_check": "Compare test status and review status.",
+                "confidence": "low",
+            }
+        ],
+    }
+
+    exit_code = main(
+        [
+            "--sources",
+            str(sources),
+            "--question",
+            "What evidence shows testing is complete?",
+            "--output-dir",
+            str(output_dir),
+        ],
+        review_client=FakeReviewClient(
+            json.dumps(_valid_response()), follow_up_response=json.dumps(follow_up)
+        ),
+    )
+
+    trace = json.loads((output_dir / TRACE_FILE_NAME).read_text("utf-8"))
+    report = (output_dir / PROJECT_EVIDENCE_REPORT_FILE_NAME).read_text("utf-8")
+    assert exit_code == 0
+    assert "What evidence shows testing is complete?" in report
+    assert "CL-0001" in report
+    assert "EV-0001" in report
+    assert "ME-0001" in report
+    assert "CON-0001" in report
+    assert "SRC-0001" in report
+    assert "Check the full test record and sign-off path." in report
+    assert "Check for a final sign-off record." in report
+    assert "Compare test status and review status." in report
+    assert "Missing evidence is a gap signal" in report
+    assert "not proof that the evidence does not exist elsewhere" in report
+    assert "possible tensions in the supplied evidence" in report
+    assert "not final findings" in report
+    assert "## Limitations" in report
+    assert "## Authority boundary" in report
+    assert "go-live is approved" not in report.lower()
+    assert "project is approved" not in report.lower()
+    assert trace["project_evidence_report_written"] is True
+    assert trace["project_evidence_report_status"] == "written"
+    assert trace["report_claim_count"] == 1
+    assert trace["report_missing_evidence_count"] == 1
+    assert trace["report_contradiction_candidate_count"] == 1
+    assert trace["report_human_check_count"] == 3
+    assert trace["approval_decision_status"] == "not_performed"
+    assert trace["go_live_decision_status"] == "not_performed"
 
 
 def _valid_response() -> dict[str, object]:

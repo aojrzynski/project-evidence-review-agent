@@ -2,8 +2,9 @@
 
 The CLI records a human review question, inventories supported local sources,
 creates deterministic evidence packs, and, unless ``--no-llm`` is used, runs
-bounded LLM review over selected evidence. It still does not write the final
-human-readable project evidence report or approve a project.
+bounded LLM review and follow-up analysis over selected evidence. After those
+LLM-backed artifacts pass validation, it assembles a human-readable project
+evidence report without making another LLM call or approving a project.
 """
 
 from __future__ import annotations
@@ -30,6 +31,11 @@ from project_evidence_review_agent.llm_client import (
 from project_evidence_review_agent.llm_context import (
     build_llm_safe_review_context,
     write_llm_safe_review_context,
+)
+from project_evidence_review_agent.project_report import (
+    INPUT_ARTIFACTS,
+    PROJECT_EVIDENCE_REPORT_FILE_NAME,
+    write_project_evidence_report,
 )
 from project_evidence_review_agent.retrieval import (
     validate_max_chunks,
@@ -167,6 +173,13 @@ def main(
     contradiction_validation_status = "not_performed"
     contradiction_candidate_count = 0
     rejected_contradiction_count = 0
+    project_evidence_report_written = False
+    project_evidence_report_path = None
+    project_evidence_report_status = "not_requested_or_not_applicable"
+    report_claim_count = 0
+    report_missing_evidence_count = 0
+    report_contradiction_candidate_count = 0
+    report_human_check_count = 0
 
     if args.sources is not None:
         try:
@@ -203,6 +216,7 @@ def main(
                 llm_review_status = "skipped_no_llm"
                 missing_evidence_status = "skipped_no_llm"
                 contradiction_detection_status = "skipped_no_llm"
+                project_evidence_report_status = "skipped_no_llm"
             else:
                 llm_safe_context = build_llm_safe_review_context(
                     retrieval_summary.evidence_pack_payload
@@ -223,6 +237,7 @@ def main(
                     claim_review_validation_status = "not_validated"
                     missing_evidence_status = "skipped_claim_review_failed"
                     contradiction_detection_status = "skipped_claim_review_failed"
+                    project_evidence_report_status = "skipped_claim_review_failed"
                     print(
                         f"error: LLM claim review requested but not configured: {exc} "
                         "Rerun with --no-llm for deterministic evidence-pack mode.",
@@ -280,9 +295,51 @@ def main(
                         rejected_contradiction_count = (
                             follow_up_result.rejected_contradiction_count
                         )
+                        if (
+                            missing_evidence_status == "completed"
+                            and missing_evidence_validation_status == "passed"
+                            and contradiction_detection_status == "completed"
+                            and contradiction_validation_status == "passed"
+                        ):
+                            trace_summary = {
+                                "loaded_source_count": (inventory_summary.loaded_count),
+                                "skipped_source_count": (
+                                    inventory_summary.skipped_count
+                                ),
+                                "evidence_chunk_count": (
+                                    evidence_index_summary.chunk_count
+                                ),
+                                "project_evidence_report_status": "written",
+                            }
+                            report_summary = write_project_evidence_report(
+                                output_dir=args.output_dir,
+                                evidence_pack=retrieval_summary.evidence_pack_payload,
+                                claim_review=claim_review_result.payload,
+                                missing_evidence=(
+                                    follow_up_result.missing_evidence_payload
+                                ),
+                                contradiction_log=(
+                                    follow_up_result.contradiction_payload
+                                ),
+                                trace_summary=trace_summary,
+                            )
+                            project_evidence_report_written = True
+                            project_evidence_report_path = report_summary.path
+                            project_evidence_report_status = "written"
+                            report_claim_count = report_summary.claim_count
+                            report_missing_evidence_count = (
+                                report_summary.missing_evidence_count
+                            )
+                            report_contradiction_candidate_count = (
+                                report_summary.contradiction_candidate_count
+                            )
+                            report_human_check_count = report_summary.human_check_count
+                        else:
+                            project_evidence_report_status = "skipped_followup_failed"
                     else:
                         missing_evidence_status = "skipped_claim_review_failed"
                         contradiction_detection_status = "skipped_claim_review_failed"
+                        project_evidence_report_status = "skipped_claim_review_failed"
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -365,6 +422,17 @@ def main(
             contradiction_validation_status=contradiction_validation_status,
             contradiction_candidate_count=contradiction_candidate_count,
             rejected_contradiction_count=rejected_contradiction_count,
+            project_evidence_report_written=project_evidence_report_written,
+            project_evidence_report_path=project_evidence_report_path,
+            project_evidence_report_status=project_evidence_report_status,
+            report_input_artifacts=INPUT_ARTIFACTS
+            if project_evidence_report_written
+            else [],
+            report_claim_count=report_claim_count,
+            report_missing_evidence_count=report_missing_evidence_count,
+            report_contradiction_candidate_count=report_contradiction_candidate_count,
+            report_human_check_count=report_human_check_count,
+            final_report_is_not_approval=True,
         )
     except OSError as exc:
         print(
@@ -374,6 +442,13 @@ def main(
         return 1
 
     if args.sources is not None and not args.no_llm:
+        if project_evidence_report_written:
+            print(
+                f"Wrote {PROJECT_EVIDENCE_REPORT_FILE_NAME}: "
+                f"{project_evidence_report_path}"
+            )
+            print(f"First artifact to open: {project_evidence_report_path}")
+            print(f"Wrote evidence pack Markdown: {evidence_pack_markdown_path}")
         if claim_review_written:
             print(f"Wrote claim review: {claim_review_path}")
         if missing_evidence_written:

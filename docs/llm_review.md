@@ -26,7 +26,7 @@ A failed validation is safer than a misleading successful review. The failed art
 
 ## Follow-up analysis for gaps and contradiction candidates
 
-After `claim_review.json` passes validation, PR #7 runs one bounded follow-up LLM call over the saved LLM-safe context and the validated claim review. It writes two artifacts only if this stage can be safely parsed and validated:
+After `claim_review.json` passes validation, the workflow runs one bounded follow-up LLM call over the saved LLM-safe context and the validated claim review. It writes two artifacts only if this stage can be safely parsed and validated:
 
 - `missing_evidence.json` for evidence gaps or uncertainties in the supplied evidence.
 - `contradiction_log.json` for possible tensions between cited evidence chunks.
@@ -38,3 +38,9 @@ If follow-up output is malformed, cites invented evidence IDs, uses source IDs i
 ## Not approval
 
 `claim_review.json`, `missing_evidence.json`, and `contradiction_log.json` are review material. They do not approve readiness, compliance, certification, security, privacy, legal status, or go-live. Human review remains the final authority.
+
+## Human-readable report assembly
+
+PR #8 does not make another LLM call. `project_evidence_report.md` is assembled from artifacts that have already been written and validated: retrieval outputs, the evidence pack, bounded claim review, missing evidence signals, and contradiction candidates.
+
+Validation makes the report safer by checking structure, citation IDs, and authority language before the report is written. Validation does not prove real-world truth, completeness, compliance, security, privacy, legal status, readiness, or go-live status. The report remains review material for a human reviewer, and human review remains final.
