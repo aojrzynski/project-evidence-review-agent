@@ -2,15 +2,15 @@
 
 The trace exists so a human can prove the command ran and see the exact boundary
 of the current implementation. Source inventory records what local material was
-found, loaded, or skipped. Evidence indexing then chunks only loaded supported
-sources into bounded local references that later stages may cite.
+found, evidence indexing chunks loaded supported sources, and deterministic
+retrieval can select a bounded set of lexical matches for the review question.
 
-This stage still does not retrieve evidence for the question, build evidence
-packs, ask an LLM to review claims, detect missing evidence, detect
-contradictions, or produce any readiness, approval, legal, compliance, privacy,
-security, certification, or go-live verdict. The project protects evidence and
-authority boundaries by recording what happened, what did not happen, and that
-human review remains the final authority.
+This stage still does not ask an LLM to review claims, detect missing evidence,
+detect contradictions, write a Markdown report, or produce any readiness,
+approval, legal, compliance, privacy, security, certification, or go-live
+verdict. The project protects evidence and authority boundaries by recording
+what happened, what did not happen, and that human review remains the final
+authority.
 """
 
 from __future__ import annotations
@@ -30,10 +30,12 @@ AUTHORITY_BOUNDARY = (
     "decisions. Human review remains the final authority."
 )
 SCAFFOLD_NOTE = (
-    "PR #3 preparation run: source inventory may describe supplied local files "
-    "and evidence indexing may create bounded chunks, but no retrieval was "
-    "performed, no evidence pack was created, no LLM review was performed, and "
-    "no project claim was evaluated."
+    "PR #4 run: source inventory and evidence indexing may prepare bounded "
+    "local chunks, and deterministic retrieval may select lexical matches for "
+    "an evidence pack. Retrieval is not review: no LLM review was performed, no "
+    "missing evidence detection was performed, no contradiction detection was "
+    "performed, no Markdown report was written, and no project claim or go-live "
+    "decision was approved. When sources are not supplied, no retrieval is performed."
 )
 
 
@@ -47,25 +49,17 @@ def build_trace(
     evidence_index_written: bool = False,
     evidence_chunk_count: int = 0,
     chunking_status: str = "not_requested",
+    review_question_written: bool = False,
+    retrieval_trace_written: bool = False,
+    evidence_pack_written: bool = False,
+    selected_evidence_chunk_count: int = 0,
+    max_chunks: int = 10,
+    source_fingerprint_warning_count: int = 0,
 ) -> dict[str, Any]:
-    """Build the JSON-serializable trace payload for a preparation run.
+    """Build the JSON-serializable trace payload for a retrieval run."""
 
-    Args:
-        question: The human review question supplied to the CLI.
-        output_dir: Directory where the trace artifact will be written.
-        sources_path: Optional local file or directory supplied for inventory.
-        source_inventory_written: Whether ``source_inventory.json`` was written.
-        loaded_source_count: Count of supported files loaded for metadata.
-        skipped_source_count: Count of unsupported or invalid files skipped.
-        evidence_index_written: Whether ``evidence_index.json`` was written.
-        evidence_chunk_count: Count of bounded evidence chunks created.
-        chunking_status: Explicit status for the evidence indexing stage.
-
-    Returns:
-        A dictionary that records run metadata and makes the current non-review
-        status explicit.
-    """
-
+    retrieval_status = "completed" if retrieval_trace_written else "not_performed"
+    evidence_pack_status = "completed" if evidence_pack_written else "not_performed"
     return {
         "tool_name": TOOL_NAME,
         "package_name": "project_evidence_review_agent",
@@ -74,9 +68,9 @@ def build_trace(
         "review_question": question,
         "output_directory": str(output_dir),
         "supplied_sources_path": str(sources_path) if sources_path else None,
-        "workflow_stage": "pr_003_chunking_evidence_index",
-        "workflow_status": "source_inventory_and_evidence_index"
-        if evidence_index_written
+        "workflow_stage": "pr_004_review_question_retrieval",
+        "workflow_status": "deterministic_retrieval_completed"
+        if retrieval_trace_written
         else "scaffold_trace_only",
         "artifact": TRACE_FILE_NAME,
         "source_inventory_written": source_inventory_written,
@@ -90,12 +84,20 @@ def build_trace(
         "evidence_index_written": evidence_index_written,
         "evidence_chunk_count": evidence_chunk_count,
         "chunking_status": chunking_status,
-        "retrieval_status": "not_performed",
-        "evidence_pack_status": "not_performed",
+        "review_question_written": review_question_written,
+        "retrieval_trace_written": retrieval_trace_written,
+        "evidence_pack_written": evidence_pack_written,
+        "selected_evidence_chunk_count": selected_evidence_chunk_count,
+        "max_chunks": max_chunks,
+        "source_fingerprint_warning_count": source_fingerprint_warning_count,
+        "retrieval_status": retrieval_status,
+        "evidence_pack_status": evidence_pack_status,
         "llm_review_status": "not_performed",
         "evidence_review_status": "not_performed",
         "missing_evidence_detection_status": "not_performed",
         "contradiction_detection_status": "not_performed",
+        "project_evidence_markdown_report_status": "not_performed",
+        "markdown_report_status": "not_performed",
         "approval_decision_status": "not_performed",
         "go_live_decision_status": "not_performed",
         "scaffold_note": SCAFFOLD_NOTE,
@@ -113,14 +115,14 @@ def write_trace(
     evidence_index_written: bool = False,
     evidence_chunk_count: int = 0,
     chunking_status: str = "not_requested",
+    review_question_written: bool = False,
+    retrieval_trace_written: bool = False,
+    evidence_pack_written: bool = False,
+    selected_evidence_chunk_count: int = 0,
+    max_chunks: int = 10,
+    source_fingerprint_warning_count: int = 0,
 ) -> Path:
-    """Write the trace artifact and return its path.
-
-    The output directory is created if needed. Source inventory and evidence
-    index artifacts may be written for local preparation, but retrieval outputs,
-    evidence packs, reports, and LLM outputs remain deliberately outside this
-    stage.
-    """
+    """Write the trace artifact and return its path."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     trace_path = output_dir / TRACE_FILE_NAME
@@ -134,6 +136,12 @@ def write_trace(
         evidence_index_written=evidence_index_written,
         evidence_chunk_count=evidence_chunk_count,
         chunking_status=chunking_status,
+        review_question_written=review_question_written,
+        retrieval_trace_written=retrieval_trace_written,
+        evidence_pack_written=evidence_pack_written,
+        selected_evidence_chunk_count=selected_evidence_chunk_count,
+        max_chunks=max_chunks,
+        source_fingerprint_warning_count=source_fingerprint_warning_count,
     )
     trace_path.write_text(
         json.dumps(trace_payload, indent=2, sort_keys=True) + "\n",
