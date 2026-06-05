@@ -1,0 +1,5 @@
+project_name: synthetic_go_live_example
+environment: local-demo
+review_required: true
+owners:
+  - Example Owner

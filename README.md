@@ -1,21 +1,14 @@
 # Project Evidence Review Agent
 
-Project Evidence Review Agent is a local-first workflow scaffold for reviewing project claims against bounded evidence.
+Project Evidence Review Agent is a bounded, local-first workflow for helping a human inspect project evidence. It organizes supplied project material, records what was found and skipped, and keeps authority with the reviewer.
 
-It is designed for questions such as:
-
-- What evidence do we have for this project claim?
-- What evidence is missing?
-- What may contradict the claim?
-- What should a human reviewer check next?
-
-The project does not approve projects, certify readiness, replace governance, or make legal, compliance, privacy, security, or go-live decisions. Human review remains the final authority.
+It does not approve projects, certify readiness, replace governance, or make legal, compliance, privacy, security, or go-live decisions. Human review remains the final authority.
 
 ## Plain-English purpose
 
-Project work often leaves evidence spread across plans, notes, tickets, decisions, and review materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to gather the relevant local evidence, show what was considered, show what was missing, and keep the final judgment with a human reviewer.
+Project work often leaves evidence spread across plans, notes, decisions, risks, test notes, and release materials. When someone asks whether a claim is supported, the first problem is not to generate a confident answer. The first problem is to identify the local material that was supplied, show what the tool could load, show what it skipped, and preserve clear boundaries before any later review step.
 
-This repository starts that workflow in small steps. PR #1 only creates the Python package, command-line entrypoint, trace artifact, tests, linting, CI, and initial documentation.
+PR #2 adds that intake foundation. The tool can now inventory local source files and write a deterministic `source_inventory.json` artifact. Source inventory is not evidence review. Loading a file does not mean its contents support any claim.
 
 ## Deterministic evidence packs and LLM review
 
@@ -26,34 +19,74 @@ The planned workflow has two different layers:
 
 A later `--no-llm` mode should mean evidence-pack-only. It should not mean a full review without the model. In that mode, the tool should stop after producing deterministic evidence artifacts for a human or separate review step.
 
-## What PR #1 currently does
+## What PR #2 currently does
 
-PR #1 provides a narrow scaffold:
+PR #2 provides local source inventory and intake support:
 
 - Defines the `project_evidence_review_agent` Python package.
 - Adds the `project-evidence-review` CLI command.
-- Accepts `--question`, `--output-dir`, and `--version`.
+- Accepts `--question`, `--output-dir`, `--sources`, and `--version`.
+- Accepts one local source path as either a file or directory.
+- Walks directories recursively while ignoring hidden directories and common Python/tooling cache directories.
+- Loads supported local Markdown, text, JSON, YAML, and CSV files for bounded metadata.
+- Skips unsupported file extensions with clear reasons.
 - Creates the output directory when needed.
-- Writes one artifact: `project_evidence_trace.json`.
-- Records that the run is scaffold-only and that no source loading or evidence review has happened.
-- Adds tests, Ruff configuration, and GitHub Actions CI.
+- Writes `source_inventory.json` when `--sources` is supplied.
+- Continues writing `project_evidence_trace.json`.
+- Records that no chunking, retrieval, LLM review, or approval decision happened.
+- Adds a standard MIT license, synthetic example project material, tests, Ruff configuration, and CI-ready checks.
+
+## Supported source file types
+
+PR #2 supports these extensions:
+
+- `.md`
+- `.txt`
+- `.json`
+- `.yaml`
+- `.yml`
+- `.csv`
+
+Unsupported files are not treated as review failures. They are skipped with a reason in the source inventory. PDF, DOCX, OCR, web pages, remote services, external connectors, embeddings, vector databases, OpenAI, and LangGraph are not implemented in this PR.
+
+## What `source_inventory.json` contains
+
+When `--sources` is supplied, the tool writes `source_inventory.json` with deterministic records such as:
+
+- `source_id`, such as `SRC-0001`.
+- Relative `path` and `file_name`.
+- File `extension` and `source_type`.
+- `status`, either `loaded` or `skipped`.
+- `skip_reason` for skipped files.
+- `size_bytes`, where available.
+- `line_count`, where practical.
+- Bounded `content_preview` for supported text-like files.
+- Parser metadata.
+- Basic JSON/YAML top-level type and keys when practical.
+- CSV row count and column names when practical.
+
+The inventory deliberately does not dump whole documents into the artifact and does not say whether any source supports a claim.
 
 ## What is not implemented yet
 
-PR #1 deliberately does not:
+PR #2 deliberately does not:
 
-- Load project sources.
-- Support `--sources`.
 - Chunk documents.
+- Create `evidence_index.json`.
+- Create `review_question.json`.
 - Retrieve evidence.
-- Create evidence IDs.
-- Write `source_inventory.json`.
-- Write `evidence_index.json`.
-- Write `evidence_pack.json` or `evidence_pack.md`.
+- Create `retrieval_trace.json`.
+- Create `evidence_pack.json`.
+- Create `evidence_pack.md`.
 - Call an LLM.
 - Add OpenAI, LangGraph, embeddings, vector databases, or external connectors.
 - Parse PDF, DOCX, OCR, web pages, Google Drive, GitHub APIs, or other remote systems.
-- Produce readiness, approval, compliance, privacy, security, or go-live verdicts.
+- Detect missing evidence.
+- Detect contradictions.
+- Produce a final project evidence report.
+- Produce readiness, approval, compliance, privacy, security, certification, or go-live verdicts.
+
+Full review mode will come later, after deterministic source intake, chunking, retrieval, and evidence-pack artifacts are in place.
 
 ## Safety and authority boundaries
 
@@ -61,11 +94,16 @@ The workflow is intended to help a human review evidence. It must not become an 
 
 Current and future outputs should preserve these boundaries:
 
-- The tool should separate evidence from interpretation.
+- The tool should separate inventory from evidence review.
+- Loading a file should not imply that the file supports any project claim.
 - Future claims should cite evidence IDs.
 - Missing evidence and possible contradictions should be shown as review prompts, not final verdicts.
 - The LLM should eventually reason only over bounded supplied evidence.
 - Human review remains the final authority.
+
+## Synthetic local demo material
+
+The example material under `examples/project_pack/` is fake and simple. Local demo material should stay synthetic and should not contain secrets, client data, private project data, credentials, tokens, or sensitive material.
 
 ## Quick start
 
@@ -77,24 +115,37 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-Run the scaffold command:
+Run the intake command with synthetic local sources:
 
 ```bash
-project-evidence-review --question "Is the project ready for go-live?" --output-dir outputs/scaffold_run
+project-evidence-review \
+  --sources examples/project_pack \
+  --question "Is the project ready for go-live?" \
+  --output-dir outputs/source_inventory_run
 ```
 
 Expected result:
 
 ```text
-outputs/scaffold_run/project_evidence_trace.json
+outputs/source_inventory_run/source_inventory.json
+outputs/source_inventory_run/project_evidence_trace.json
 ```
 
-The trace records the question, package version, timestamp, output directory, scaffold status, and authority boundary.
+The trace records the question, output directory, supplied source path, source inventory counts, package version, timestamp, and authority boundary. It also confirms that no chunking, retrieval, LLM review, or approval decision happened.
+
+You can still run without `--sources` to write only the trace:
+
+```bash
+project-evidence-review --question "What evidence supports this claim?" --output-dir outputs/scaffold_run
+```
 
 You can also run the package module directly:
 
 ```bash
-python -m project_evidence_review_agent --question "What evidence supports this claim?" --output-dir outputs/example
+python -m project_evidence_review_agent \
+  --sources examples/project_pack \
+  --question "What evidence supports this claim?" \
+  --output-dir outputs/example
 ```
 
 ## Run tests and checks

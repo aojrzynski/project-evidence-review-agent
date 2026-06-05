@@ -1,0 +1,3 @@
+Synthetic testing notes only.
+
+Smoke tests passed in a local fake environment. Load testing is not complete.
