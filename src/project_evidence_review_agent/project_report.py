@@ -126,12 +126,16 @@ def render_project_evidence_report(
     """
 
     trace_summary = trace_summary or {}
+    # All report sections are assembled from validated artifacts. The renderer
+    # does not call the LLM again or derive new findings.
     question = str(evidence_pack.get("question") or claim_review.get("question") or "")
     claims = _list(claim_review.get("claims"))
     supported_claims = [c for c in claims if c.get("status") in SUPPORTED_STATUSES]
     unclear_claims = [c for c in claims if c.get("status") in UNCLEAR_STATUSES]
     missing_items = _list(missing_evidence.get("missing_evidence"))
     contradiction_items = _list(contradiction_log.get("contradiction_candidates"))
+    # Human checks are consolidated from upstream artifacts so reviewers have a
+    # single checklist, but the report does not invent new checks.
     human_checks = collect_recommended_human_checks(
         claim_review=claim_review,
         missing_evidence=missing_evidence,
@@ -341,7 +345,11 @@ def collect_recommended_human_checks(
     missing_evidence: dict[str, Any],
     contradiction_log: dict[str, Any],
 ) -> list[str]:
-    """Collect artifact-provided human checks with simple deterministic dedupe."""
+    """Collect artifact-provided human checks with deterministic dedupe.
+
+    The checklist is a consolidation convenience for reviewers, not a new
+    reasoning stage or approval gate.
+    """
 
     checks: list[str] = []
     checks.extend(
@@ -435,6 +443,12 @@ def _render_contradiction(item: dict[str, Any]) -> list[str]:
 
 
 def _render_selected_evidence_map(evidence_pack: dict[str, Any]) -> list[str]:
+    """Render compact selected-evidence references, not full excerpts.
+
+    Full selected excerpts remain in evidence_pack.md so the final report stays
+    readable while preserving a clear path back to the evidence pack.
+    """
+
     chunks = _list(evidence_pack.get("selected_chunks"))
     lines = [
         "## Selected evidence map",
@@ -508,6 +522,8 @@ def _render_source_map(evidence_pack: dict[str, Any]) -> list[str]:
 
 
 def _render_limitations(*payloads: dict[str, Any]) -> list[str]:
+    """Merge upstream limitations with fixed report boundary reminders."""
+
     lines = ["## Limitations", ""]
     fixed = [
         "The report only covers supplied local material.",

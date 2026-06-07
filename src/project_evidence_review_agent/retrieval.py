@@ -91,7 +91,11 @@ class RetrievalSummary:
 
 
 def validate_max_chunks(value: int) -> int:
-    """Validate the bounded evidence-pack chunk limit."""
+    """Validate the bounded evidence-pack chunk limit.
+
+    The limit protects downstream context size. It does not change scoring; it
+    only caps how many ranked chunks become selected evidence.
+    """
 
     if value <= 0:
         raise ValueError("--max-chunks must be a positive integer")
@@ -101,17 +105,26 @@ def validate_max_chunks(value: int) -> int:
 def build_retrieval_outputs(
     question: str, evidence_index: dict[str, Any], max_chunks: int
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build ``retrieval_trace.json`` and ``evidence_pack.json`` payloads."""
+    """Build retrieval trace and selected-evidence payloads.
+
+    ``retrieval_trace.json`` explains why chunks were selected.
+    ``evidence_pack.json`` contains the selected bounded excerpts. Neither file
+    answers the review question or makes project claims.
+    """
 
     validate_max_chunks(max_chunks)
     question_terms = unique_terms(question)
     normalized_question = normalize_text(question)
     chunks = list(evidence_index.get("chunks", []))
     candidates = [_score_chunk(chunk, question, question_terms) for chunk in chunks]
+    # Ranking is fully deterministic: score first, then evidence ID for stable
+    # tie-breaking. This makes evidence packs easier to diff and reproduce.
     ranked = sorted(
         candidates,
         key=lambda item: (-item["score"], str(item["chunk"].get("evidence_id", ""))),
     )
+    # Only positively scoring chunks enter the bounded evidence pack. Selection
+    # still means lexical relevance, not support or contradiction.
     selected = [candidate for candidate in ranked if candidate["score"] > 0][
         :max_chunks
     ]
@@ -186,6 +199,12 @@ def write_retrieval_outputs(
 def _score_chunk(
     chunk: dict[str, Any], question: str, question_terms: list[str]
 ) -> dict[str, Any]:
+    """Score one chunk with explainable lexical features.
+
+    The score measures overlap with the question and review-related words. It
+    does not measure truth, sufficiency, or whether the chunk supports a claim.
+    """
+
     text = str(chunk.get("text", ""))
     heading = str(chunk.get("heading") or "")
     path_text = f"{chunk.get('source_file_name', '')} {chunk.get('source_path', '')}"
@@ -210,6 +229,8 @@ def _score_chunk(
     )
 
     if text_matches:
+        # Each boost has a plain-language reason so retrieval_trace.json can be
+        # inspected without hidden model or embedding behavior.
         score += len(text_matches) * SCORING_PARAMETERS["text_term_weight"]
         reasons.append(f"text terms matched: {', '.join(text_matches)}")
     if heading_matches:
@@ -238,6 +259,8 @@ def _score_chunk(
 def _trace_chunk(
     candidate: dict[str, Any], include_reasons: bool = True
 ) -> dict[str, Any]:
+    """Render retrieval reasoning without copying full chunk text."""
+
     chunk = candidate["chunk"]
     payload = {
         "evidence_id": chunk.get("evidence_id"),
@@ -254,6 +277,8 @@ def _trace_chunk(
 
 
 def _pack_chunk(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Render one selected chunk for the bounded evidence pack."""
+
     chunk = candidate["chunk"]
     return {
         "evidence_id": chunk.get("evidence_id"),
@@ -278,6 +303,8 @@ def _pack_chunk(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def _source_map(selected: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Summarize only sources that contributed selected chunks."""
+
     sources: dict[str, dict[str, Any]] = {}
     for candidate in selected:
         chunk = candidate["chunk"]
@@ -314,6 +341,8 @@ def _optional_warning(chunk: dict[str, Any]) -> dict[str, Any]:
 def _fingerprint_warnings(
     evidence_index: dict[str, Any], selected: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """Carry forward traceability warnings only for selected sources."""
+
     selected_ids = {candidate["chunk"].get("source_id") for candidate in selected}
     warnings = [
         warning
@@ -337,6 +366,8 @@ def _source_fingerprint_notes(warnings: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _preview(text: str) -> str:
+    """Return a bounded text preview for artifact readability."""
+
     compact = text.strip()
     if len(compact) <= TEXT_PREVIEW_CHARS:
         return compact

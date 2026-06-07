@@ -54,7 +54,11 @@ LIMITATIONS = [
 def validate_missing_evidence(
     items: Any, *, allowed_evidence_ids: list[str], allowed_claim_ids: list[str]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """Validate missing evidence entries against bounded IDs and safe wording."""
+    """Validate missing-evidence signals against bounded IDs and wording.
+
+    Accepted items are gap signals only. They do not prove that evidence is
+    absent outside the supplied material.
+    """
 
     messages: list[str] = []
     rejected: list[dict[str, Any]] = []
@@ -89,6 +93,8 @@ def validate_missing_evidence(
             )
             continue
         normalized = {field: item[field] for field in REQUIRED_MISSING_EVIDENCE_FIELDS}
+        # Deterministic generated IDs make gap signals easy to cite without
+        # trusting model-provided identifiers.
         normalized["missing_evidence_id"] = f"ME-{len(accepted) + 1:04d}"
         accepted.append(normalized)
     return accepted, rejected, messages
@@ -140,12 +146,16 @@ def _validate_item(
     allowed_evidence_ids: set[str],
     allowed_claim_ids: set[str],
 ) -> list[str]:
+    """Validate one missing-evidence item without making absence findings."""
+
     messages: list[str] = []
     for field in REQUIRED_MISSING_EVIDENCE_FIELDS:
         if field not in item:
             messages.append(f"{item_ref}: missing field '{field}'.")
 
     gap_type = item.get("gap_type")
+    # Gap types are a small vocabulary so model output stays bounded and easy
+    # for a human to compare across runs.
     if gap_type not in ALLOWED_GAP_TYPES:
         messages.append(f"{item_ref}: invalid gap_type '{gap_type}'.")
     confidence = item.get("confidence")
@@ -160,6 +170,8 @@ def _validate_item(
         messages=messages,
     )
     if not evidence_ids and gap_type not in GAP_TYPES_ALLOWING_EMPTY_EVIDENCE_IDS:
+        # Empty evidence references are allowed only for gaps that explicitly say
+        # the evidence was not found or not searched in the supplied material.
         messages.append(
             f"{item_ref}: empty related_evidence_ids is allowed only for "
             "evidence_not_found or evidence_not_searched gaps."
@@ -185,6 +197,8 @@ def _validate_id_list(
     reject_source_ids: bool,
     messages: list[str],
 ) -> list[str]:
+    """Validate claim/evidence references against known bounded IDs."""
+
     if not isinstance(value, list):
         messages.append(f"{field} must be a list.")
         return []
@@ -194,6 +208,8 @@ def _validate_id_list(
             messages.append(f"{field} values must be strings.")
             continue
         if reject_source_ids and item.startswith("SRC-"):
+            # SRC IDs are too broad for review support; evidence references must
+            # point to selected EV chunks when a gap cites supplied material.
             messages.append(f"{field} cited source ID instead of evidence ID: {item}.")
         if item not in allowed:
             messages.append(f"{field} cited unknown ID: {item}.")
@@ -203,6 +219,8 @@ def _validate_id_list(
 
 
 def _validate_text_value(value: Any, field: str, messages: list[str]) -> None:
+    """Reject generated text that crosses into authority/verdict language."""
+
     if not isinstance(value, str):
         messages.append(f"{field} must be text.")
         return

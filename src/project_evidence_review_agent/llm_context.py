@@ -82,7 +82,10 @@ def build_llm_safe_review_context(evidence_pack: dict[str, Any]) -> dict[str, An
     """
 
     selected_chunks = list(evidence_pack.get("selected_chunks", []))
+    # The evidence pack is the boundary: unselected chunks and unsupported files
+    # are deliberately excluded from the model-visible context.
     evidence = [_context_evidence_item(chunk) for chunk in selected_chunks]
+    # These IDs become the citation allow-list used by deterministic validators.
     allowed_evidence_ids = [str(item["evidence_id"]) for item in evidence]
     source_map = _bounded_source_map(evidence_pack.get("source_map", {}), evidence)
 
@@ -103,7 +106,11 @@ def build_llm_safe_review_context(evidence_pack: dict[str, Any]) -> dict[str, An
 def write_llm_safe_review_context(
     evidence_pack: dict[str, Any], output_dir: Path
 ) -> Path:
-    """Write ``llm_safe_review_context.json`` and return its path."""
+    """Write ``llm_safe_review_context.json`` and return its path.
+
+    Writing this artifact makes the exact model input auditable. This function
+    does not call the LLM.
+    """
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / LLM_SAFE_REVIEW_CONTEXT_FILE_NAME
@@ -113,6 +120,8 @@ def write_llm_safe_review_context(
 
 
 def _context_evidence_item(chunk: dict[str, Any]) -> dict[str, Any]:
+    """Copy one selected chunk into the LLM-safe schema."""
+
     item: dict[str, Any] = {
         "evidence_id": str(chunk.get("evidence_id", "")),
         "source_id": chunk.get("source_id"),
@@ -139,6 +148,8 @@ def _context_evidence_item(chunk: dict[str, Any]) -> dict[str, Any]:
 def _bounded_source_map(
     source_map: dict[str, Any], evidence: list[dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
+    """Keep source metadata only for sources represented in selected evidence."""
+
     allowed_source_ids = {str(item.get("source_id")) for item in evidence}
     bounded: dict[str, dict[str, Any]] = {}
     for source_id, metadata in source_map.items():

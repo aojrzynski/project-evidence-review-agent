@@ -61,6 +61,8 @@ def build_evidence_index(
     """
 
     resolved_sources_path = sources_path.expanduser()
+    # Deterministic ordering keeps EV IDs stable across runs with the same
+    # inputs, which makes later citations and diffs easier to review.
     loaded_records = sorted(
         (
             record
@@ -77,6 +79,8 @@ def build_evidence_index(
     source_consistency_warnings: list[dict[str, Any]] = []
     for record in loaded_records:
         source_file = _source_file_path(resolved_sources_path, record)
+        # Fingerprint checks are traceability hints for humans. They are not
+        # authenticity guarantees and do not convert skipped files into evidence.
         consistency = _source_consistency(record, source_file)
         if consistency.get("source_consistency_warning"):
             source_consistency_warnings.append(
@@ -92,6 +96,8 @@ def build_evidence_index(
             )
         )
 
+    # Evidence IDs are deterministic citation handles. Later validators reject
+    # invented IDs by comparing model output against this bounded list.
     chunks = [
         {"evidence_id": f"EV-{index:04d}", **chunk}
         for index, chunk in enumerate(chunks_without_ids, start=1)
@@ -151,6 +157,8 @@ def write_evidence_index(
 
 
 def _source_file_path(root: Path, record: dict[str, Any]) -> Path:
+    """Resolve an inventory record back to the local file it describes."""
+
     if root.is_file():
         return root
     return root / str(record["path"])
@@ -159,6 +167,12 @@ def _source_file_path(root: Path, record: dict[str, Any]) -> Path:
 def _chunk_loaded_source(
     record: dict[str, Any], path: Path, consistency: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    """Dispatch one loaded source to the matching bounded chunker.
+
+    Unknown or skipped source types return no chunks so unsupported files remain
+    outside the evidence boundary.
+    """
+
     source_type = str(record.get("source_type", ""))
     if source_type == "markdown":
         return _apply_consistency(_chunk_markdown(record, path), consistency)
@@ -174,6 +188,12 @@ def _chunk_loaded_source(
 
 
 def _chunk_markdown(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+    """Chunk Markdown by headings and bounded line windows.
+
+    Headings and line numbers are preserved where practical because they help a
+    reviewer find the cited excerpt in the original source.
+    """
+
     lines = path.read_text(encoding="utf-8").splitlines()
     sections: list[tuple[str | None, int, list[str]]] = []
     current_heading: str | None = None
@@ -207,6 +227,8 @@ def _chunk_markdown(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
 
 
 def _chunk_text(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+    """Chunk plain text into bounded windows with line references."""
+
     lines = path.read_text(encoding="utf-8").splitlines()
     return _with_chunk_indexes(
         _chunk_line_window(
@@ -220,6 +242,12 @@ def _chunk_text(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
 
 
 def _chunk_json(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+    """Chunk JSON, preferring top-level keys when they exist.
+
+    Top-level sections often map to meaningful project sections, but this is
+    still only preparation for retrieval and review, not interpretation.
+    """
+
     parsed = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(parsed, dict):
         chunks = []
@@ -247,6 +275,8 @@ def _chunk_json(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
 
 
 def _chunk_yaml(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+    """Chunk YAML with the same top-level-section preference as JSON."""
+
     text = path.read_text(encoding="utf-8")
     parsed = (
         YAML_MODULE.safe_load(text) if YAML_MODULE is not None else _minimal_yaml(text)
@@ -276,6 +306,12 @@ def _chunk_yaml(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
 
 
 def _chunk_csv(record: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+    """Chunk CSV rows while preserving headers and row ranges.
+
+    The chunks describe selected row windows for citation. They do not validate
+    data quality or decide whether the CSV proves a claim.
+    """
+
     rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
     if not rows:
         return []
@@ -310,6 +346,8 @@ def _chunk_line_window(
     heading: str | None,
     strategy: str,
 ) -> list[dict[str, Any]]:
+    """Split lines by stable size limits while retaining source locations."""
+
     chunks: list[dict[str, Any]] = []
     window: list[str] = []
     window_start = start_line
@@ -368,6 +406,8 @@ def _bounded_text_chunks(
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> list[dict[str, Any]]:
+    """Apply the character bound after line-window splitting."""
+
     if not text.strip():
         return []
     if len(text) <= MAX_CHUNK_CHARS:
@@ -441,6 +481,8 @@ def _base_chunk(
 
 
 def _with_chunk_indexes(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Assign deterministic per-source chunk indexes after splitting."""
+
     return [
         {**chunk, "chunk_index": index} for index, chunk in enumerate(chunks, start=1)
     ]
@@ -474,6 +516,12 @@ def _dump_yaml(value: Any) -> str:
 
 
 def _minimal_yaml(text: str) -> Any:
+    """Parse only simple YAML mappings when PyYAML is unavailable.
+
+    This fallback keeps basic offline tests usable; it is not a full YAML parser
+    and does not change the evidence boundary.
+    """
+
     parsed: dict[str, Any] = {}
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
@@ -485,6 +533,8 @@ def _minimal_yaml(text: str) -> Any:
 
 
 def _preview(text: str) -> str:
+    """Return a bounded preview so artifacts do not dump full sources."""
+
     compact = " ".join(text.split())
     if len(compact) <= TEXT_PREVIEW_CHARS:
         return compact
@@ -534,4 +584,6 @@ def _source_consistency(record: dict[str, Any], path: Path) -> dict[str, Any]:
 def _apply_consistency(
     chunks: list[dict[str, Any]], consistency: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    """Attach source-consistency notes to each chunk without filtering it."""
+
     return [{**chunk, **consistency} for chunk in chunks]

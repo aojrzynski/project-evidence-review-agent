@@ -96,7 +96,12 @@ class ClaimReviewResult:
 
 
 def build_claim_review_prompt(context: dict[str, Any]) -> str:
-    """Build the strict bounded prompt for claim review."""
+    """Build the strict bounded prompt for the first LLM review stage.
+
+    The prompt includes only the saved safe context and the allowed evidence IDs.
+    It asks for structured review material, not project approval or a final
+    verdict.
+    """
 
     schema = {
         "claims": [
@@ -157,8 +162,12 @@ def run_claim_review(
     path = output_dir / CLAIM_REVIEW_FILE_NAME
     allowed_evidence_ids = [str(eid) for eid in context.get("allowed_evidence_ids", [])]
     try:
+        # The client returns model text only. All structure, citation, and
+        # authority-boundary checks happen deterministically below.
         raw_response = client.review_claims(prompt, model=model)
     except Exception as exc:  # noqa: BLE001 - convert client failures to clean artifact
+        # A failed artifact is more useful and safer than leaving callers to
+        # infer what happened from a missing claim_review.json file.
         payload = build_failed_claim_review(
             context=context,
             model=model,
@@ -171,6 +180,8 @@ def run_claim_review(
 
     parsed, parse_messages = parse_llm_response(raw_response)
     if parsed is None:
+        # Malformed JSON cannot be partially trusted, so the successful review
+        # fields stay empty and the raw output is limited to a short preview.
         payload = build_failed_claim_review(
             context=context,
             model=model,
@@ -219,12 +230,18 @@ def parse_llm_response(raw_response: str) -> tuple[dict[str, Any] | None, list[s
 def validate_claim_review_response(
     response: dict[str, Any], *, allowed_evidence_ids: list[str]
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """Validate structure, citations, statuses, and authority language."""
+    """Validate structure, citations, statuses, and authority language.
+
+    The LLM output is accepted only if it stays inside the known evidence-ID
+    boundary and avoids approval/verdict wording. Validation turns unsafe output
+    into rejected items rather than silently repairing model claims.
+    """
 
     messages: list[str] = []
     rejected_items: list[dict[str, Any]] = []
     allowed = set(allowed_evidence_ids)
 
+    # Required top-level sections keep downstream report assembly deterministic.
     for field in REQUIRED_TOP_LEVEL_FIELDS:
         if field not in response:
             messages.append(f"Missing top-level field: {field}")
@@ -253,6 +270,8 @@ def validate_claim_review_response(
             messages.append(f"{claim_ref}: claim must be an object.")
             rejected_items.append({"claim_index": index, "reason": "claim_not_object"})
             continue
+        # Each claim is validated independently so a human can see exactly which
+        # model-generated item crossed the evidence or authority boundary.
         claim_messages = _validate_claim(claim, allowed=allowed, claim_ref=claim_ref)
         if claim_messages:
             messages.extend(claim_messages)
@@ -299,6 +318,8 @@ def _claim_review_payload(
     validator_messages: list[str],
     rejected_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    """Assemble the artifact payload for both passed and failed reviews."""
+
     return {
         "claim_review_version": CLAIM_REVIEW_VERSION,
         "question": context.get("question", ""),
@@ -321,6 +342,8 @@ def _claim_review_payload(
 def _validate_claim(
     claim: dict[str, Any], *, allowed: set[str], claim_ref: str
 ) -> list[str]:
+    """Validate one model claim against bounded evidence rules."""
+
     messages: list[str] = []
     for field in REQUIRED_CLAIM_FIELDS:
         if field not in claim:
@@ -340,15 +363,21 @@ def _validate_claim(
                 messages.append(f"{claim_ref}: evidence ID values must be strings.")
                 continue
             if evidence_id.startswith("SRC-"):
+                # A whole source is too broad for claim support. The model must
+                # cite exact EV chunks that a human can inspect.
                 messages.append(
                     f"{claim_ref}: cited source ID instead of evidence ID: "
                     f"{evidence_id}."
                 )
             if evidence_id not in allowed:
+                # Unknown EV IDs are rejected rather than repaired because an
+                # invented citation breaks the bounded evidence contract.
                 messages.append(
                     f"{claim_ref}: cited unknown evidence ID: {evidence_id}."
                 )
     if status in SUPPORT_STATUSES and not evidence_ids:
+        # Support claims require citations; otherwise the review would ask the
+        # human to trust the model instead of supplied evidence.
         messages.append(
             f"{claim_ref}: {status} claims must cite at least one evidence ID."
         )
@@ -370,6 +399,8 @@ def _validate_text_collection(value: Any, field: str, messages: list[str]) -> No
 
 
 def _validate_text_value(value: Any, field: str, messages: list[str]) -> None:
+    """Validate generated text without allowing approval/verdict language."""
+
     if not isinstance(value, str):
         messages.append(f"{field} must be text.")
         return

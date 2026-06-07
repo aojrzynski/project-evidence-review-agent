@@ -55,7 +55,11 @@ BOUNDARY_NOTE = (
 
 
 def normalize_text(text: str) -> str:
-    """Return lowercase text with punctuation normalized for deterministic matching."""
+    """Return normalized text for deterministic lexical retrieval.
+
+    Normalization supports matching and traceability. It does not answer the
+    review question or interpret evidence.
+    """
 
     return " ".join(TOKEN_PATTERN.findall(text.lower()))
 
@@ -75,7 +79,7 @@ def unique_terms(text: str) -> list[str]:
 
 
 def build_review_question(question: str) -> dict[str, Any]:
-    """Build the JSON payload for ``review_question.json``."""
+    """Build the JSON payload that records what the run is trying to answer."""
 
     return {
         "review_question_version": 1,
