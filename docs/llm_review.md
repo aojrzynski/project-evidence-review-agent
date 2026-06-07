@@ -1,46 +1,90 @@
-# Bounded LLM claim review
+# LLM review
 
-The LLM receives only a bounded evidence pack because the review question must stay tied to supplied local evidence. The model is not allowed to answer from memory, invent sources, or expand the context beyond selected evidence chunks.
+Full mode uses an LLM when it is configured and `--no-llm` is not supplied. The LLM is central to full claim review, but it is not authoritative.
 
-## Why the context is saved
+The model receives bounded selected evidence. It is asked to produce structured review material. It is not asked to approve the project or make a final decision.
+
+## Deterministic mode skips LLM review
+
+When `--no-llm` is supplied, the workflow stops after deterministic evidence-pack artifacts and trace status.
+
+It does not write `llm_safe_review_context.json`, `claim_review.json`, `missing_evidence.json`, `contradiction_log.json`, or `project_evidence_report.md`.
+
+Open `evidence_pack.md` first in this mode.
+
+## Full mode is LLM-backed when configured
+
+When sources are supplied and `--no-llm` is not supplied, the CLI attempts full LLM review.
+
+The `llm` extra and `OPENAI_API_KEY` must be configured for the default OpenAI client. If they are missing, the command fails cleanly and explains how to rerun with `--no-llm`.
+
+## What `llm_safe_review_context.json` contains
 
 `llm_safe_review_context.json` records exactly what is available to the model:
 
-- The review question.
-- Selected evidence chunks.
-- Allowed `EV-0001`-style evidence IDs.
-- Source metadata needed for citations.
-- Review instructions and authority boundaries.
+- the review question;
+- selected evidence chunks;
+- allowed `EV-0001`-style evidence IDs;
+- source metadata needed for citations;
+- review instructions;
+- authority boundaries.
 
 Saving the context lets a human audit the model input before reading the claim review.
 
-## Why every supported claim needs evidence IDs
+## Why context is bounded
 
-A claim marked `evidence_supported` or `partially_supported` must cite existing evidence IDs. Citation validation keeps the review connected to the bounded evidence pack. A source ID alone is not enough because claims are evaluated against selected chunks, not entire files.
+The context is bounded so the model reviews only selected evidence. It should not answer from memory, infer from unselected project material, or invent missing sources.
+
+Bounded context also makes validation possible because supported claims must cite evidence IDs that exist in the selected evidence pack.
+
+## Why supported claims need evidence IDs
+
+Every claim marked `evidence_supported` or `partially_supported` must cite existing evidence IDs.
+
+A source ID alone is not enough. The review is tied to selected chunks, not whole files.
 
 ## What validation rejects
 
-Validation rejects output that is malformed, misses required fields, uses an unsupported claim status, invents evidence IDs, omits citations for supported claims, cites source IDs in place of evidence IDs, or uses approval and verdict language.
+Claim-review validation rejects output that:
 
-A failed validation is safer than a misleading successful review. The failed artifact preserves validator messages and rejected item summaries without treating unsafe model output as accepted review material.
+- is malformed;
+- misses required fields;
+- uses unsupported claim statuses;
+- invents evidence IDs;
+- omits citations for supported or partially supported claims;
+- cites source IDs in place of evidence IDs;
+- uses approval or verdict language;
+- crosses the authority boundary.
 
-## Follow-up analysis for gaps and contradiction candidates
+Follow-up validation rejects output that invents claim IDs or evidence IDs, omits required contradiction-side citations, gives unsupported structures, or uses verdict language.
 
-After `claim_review.json` passes validation, the workflow runs one bounded follow-up LLM call over the saved LLM-safe context and the validated claim review. It writes two artifacts only if this stage can be safely parsed and validated:
+## What happens on failed validation
 
-- `missing_evidence.json` for evidence gaps or uncertainties in the supplied evidence.
-- `contradiction_log.json` for possible tensions between cited evidence chunks.
+A failed validation is treated as a safer stop.
 
-Missing evidence is a gap signal, not proof that an artifact does not exist elsewhere. Contradiction candidates must cite valid evidence IDs on both sides so a human can inspect the exact chunks. A candidate is not a final contradiction finding.
+The workflow records failure details and skips downstream successful report assembly. It does not turn unsafe model output into a polished final report.
 
-If follow-up output is malformed, cites invented evidence IDs, uses source IDs instead of evidence IDs, invents claim IDs, omits required contradiction-side citations, or uses verdict language, validation fails. A failed validation artifact is safer than a misleading successful artifact.
+## Follow-up analysis
 
-## Not approval
+After `claim_review.json` passes validation, the workflow runs bounded follow-up analysis using the saved LLM-safe context and the validated claim review.
 
-`claim_review.json`, `missing_evidence.json`, and `contradiction_log.json` are review material. They do not approve readiness, compliance, certification, security, privacy, legal status, or go-live. Human review remains the final authority.
+This writes:
 
-## Human-readable report assembly
+- `missing_evidence.json` for evidence gap signals;
+- `contradiction_log.json` for possible tension candidates.
 
-PR #8 does not make another LLM call. `project_evidence_report.md` is assembled from artifacts that have already been written and validated: retrieval outputs, the evidence pack, bounded claim review, missing evidence signals, and contradiction candidates.
+Missing evidence is not proof of absence. Contradiction candidates are not final findings. Both are prompts for human review.
 
-Validation makes the report safer by checking structure, citation IDs, and authority language before the report is written. Validation does not prove real-world truth, completeness, compliance, security, privacy, legal status, readiness, or go-live status. The report remains review material for a human reviewer, and human review remains final.
+## Final report assembly does not call the LLM again
+
+`project_evidence_report.md` is assembled from validated artifacts. The report stage does not make another LLM call and does not add a new decision stage.
+
+## No tools, web search, uploads, or streaming
+
+The workflow does not give the LLM web search tools, runtime file upload tools, function calling tools, or streaming tool calls. The model input is the saved bounded context.
+
+## Human authority
+
+LLM-backed artifacts are review material. They do not approve readiness, compliance, certification, security, privacy, legal status, governance, or go-live.
+
+Human review remains the final authority.
