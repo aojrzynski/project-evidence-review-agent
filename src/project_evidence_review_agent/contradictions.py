@@ -82,6 +82,8 @@ def validate_contradictions(
             )
             continue
         normalized = {field: item[field] for field in REQUIRED_CONTRADICTION_FIELDS}
+        # Deterministic generated IDs make candidates easy to reference without
+        # trusting model-provided identifiers.
         normalized["contradiction_id"] = f"CON-{len(accepted) + 1:04d}"
         accepted.append(normalized)
     return accepted, rejected, messages
@@ -133,6 +135,8 @@ def _validate_candidate(
     allowed_evidence_ids: set[str],
     allowed_claim_ids: set[str],
 ) -> list[str]:
+    """Validate one contradiction candidate without treating it as a finding."""
+
     messages: list[str] = []
     for field in REQUIRED_CONTRADICTION_FIELDS:
         if field not in item:
@@ -172,6 +176,12 @@ def _validate_side(
     allowed_evidence_ids: set[str],
     messages: list[str],
 ) -> None:
+    """Validate one cited side of a possible tension.
+
+    Both sides need concrete EV IDs because vague contradiction claims are hard
+    for a human to verify.
+    """
+
     if not isinstance(value, dict):
         messages.append(f"{field} must be an object.")
         return
@@ -186,11 +196,15 @@ def _validate_side(
             messages.append(f"{field}.evidence_ids values must be strings.")
             continue
         if evidence_id.startswith("SRC-"):
+            # A whole source is too broad for a contradiction side; the candidate
+            # must point to bounded evidence chunks.
             messages.append(
                 f"{field}.evidence_ids cited source ID instead of evidence ID: "
                 f"{evidence_id}."
             )
         if evidence_id not in allowed_evidence_ids:
+            # Invented or unselected EV IDs break the same bounded-citation rule
+            # used by claim review.
             messages.append(
                 f"{field}.evidence_ids cited unknown evidence ID: {evidence_id}."
             )
@@ -212,6 +226,8 @@ def _validate_claim_ids(
 
 
 def _validate_text_value(value: Any, field: str, messages: list[str]) -> None:
+    """Reject generated text that crosses into authority/verdict language."""
+
     if not isinstance(value, str):
         messages.append(f"{field} must be text.")
         return

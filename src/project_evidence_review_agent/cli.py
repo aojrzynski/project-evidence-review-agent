@@ -36,6 +36,13 @@ from project_evidence_review_agent.workflow_state import WorkflowConfig, Workflo
 
 
 def _positive_int(value: str) -> int:
+    """Validate ``--max-chunks`` before workflow execution starts.
+
+    The limit controls the size of the selected evidence pack and, when LLM
+    review is enabled, the maximum evidence context passed downstream. Failing
+    early keeps invalid bounds out of both orchestrators.
+    """
+
     try:
         parsed = int(value)
     except ValueError as exc:
@@ -48,7 +55,12 @@ def _positive_int(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the CLI parser for the evidence preparation command."""
+    """Create the CLI parser that captures user intent only.
+
+    The parser does not build artifacts or interpret evidence. It records the
+    requested question, bounds, LLM mode, and orchestrator so the workflow layer
+    can run the same business stages consistently.
+    """
 
     parser = argparse.ArgumentParser(
         prog="project-evidence-review",
@@ -73,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional local file or directory to inventory, chunk, and retrieve from.",
     )
+    # This bound is parsed with a custom validator because it constrains the
+    # selected evidence pack and any later LLM context size.
     parser.add_argument(
         "--max-chunks",
         type=_positive_int,
@@ -82,6 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Must be positive. Default: 10."
         ),
     )
+    # --no-llm is a first-class deterministic evidence-pack mode, not an error
+    # recovery path. It lets users inspect selected local evidence without any
+    # optional model dependency.
     parser.add_argument(
         "--no-llm",
         action="store_true",
@@ -98,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"Default: {DEFAULT_LLM_MODEL}."
         ),
     )
+    # The orchestrator flag selects execution shape only. LangGraph is optional
+    # and must not change evidence selection, validation, or report meaning.
     parser.add_argument(
         "--orchestrator",
         choices=("standard", "langgraph"),
@@ -119,7 +138,13 @@ def main(
     argv: list[str] | None = None,
     review_client: ReviewLLMClient | None = None,
 ) -> int:
-    """Run the CLI and return a process exit code."""
+    """Run the CLI and return the process exit code.
+
+    ``review_client`` is an injection seam for tests and callers that want to
+    exercise the same CLI flow without constructing the optional OpenAI client.
+    Missing optional LangGraph or LLM configuration is reported cleanly here,
+    while the workflow remains responsible for trace-safe stage statuses.
+    """
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -134,6 +159,8 @@ def main(
     )
 
     try:
+        # Dispatch to the requested orchestration layer. Both branches call the
+        # same stage functions, so CLI behavior does not depend on graph usage.
         if args.orchestrator == "langgraph":
             result = run_langgraph_workflow(config, review_client=review_client)
         else:
@@ -174,6 +201,12 @@ def main(
 
 
 def _print_written_artifacts(config: WorkflowConfig, result: WorkflowResult) -> None:
+    """Print user guidance after artifacts have already been written.
+
+    These messages are not part of artifact generation or validation. They only
+    help a CLI user find the files that the workflow reported as written.
+    """
+
     if config.sources_path is not None and result.source_inventory_written:
         print(f"Wrote source inventory: {config.output_dir / 'source_inventory.json'}")
         print(f"Wrote evidence index: {config.output_dir / 'evidence_index.json'}")

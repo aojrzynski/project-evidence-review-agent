@@ -41,7 +41,13 @@ def write_evidence_pack_markdown(
 
 
 def render_evidence_pack_markdown(evidence_pack: dict[str, Any]) -> str:
-    """Return deterministic Markdown for a bounded evidence pack payload."""
+    """Return deterministic Markdown for a bounded evidence pack payload.
+
+    The renderer reads the supplied JSON payload and never reruns retrieval, so
+    ``evidence_pack.md`` is a view of the selected evidence rather than a second
+    selection process. In ``--no-llm`` mode this is often the first artifact a
+    reviewer should open.
+    """
 
     selected_chunks = list(evidence_pack.get("selected_chunks", []))
     source_map = evidence_pack.get("source_map", {}) or {}
@@ -174,6 +180,8 @@ def render_evidence_pack_markdown(evidence_pack: dict[str, Any]) -> str:
 
 
 def _render_chunk(chunk: dict[str, Any]) -> list[str]:
+    """Render one selected evidence chunk with citation metadata."""
+
     evidence_id = str(chunk.get("evidence_id", "Evidence chunk"))
     lines = [
         f"### {_heading_text(evidence_id)}",
@@ -249,6 +257,8 @@ def _source_fingerprint_warning_count(evidence_pack: dict[str, Any]) -> int:
 
 
 def _bounded_excerpt(text: str) -> str:
+    """Keep Markdown excerpts bounded even when selected chunks are long."""
+
     if len(text) <= MAX_EXCERPT_CHARS:
         return text
     return (

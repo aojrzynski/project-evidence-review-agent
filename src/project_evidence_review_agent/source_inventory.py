@@ -73,6 +73,8 @@ def build_source_inventory(sources_path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"--sources path does not exist: {sources_path}")
 
     source_files = _discover_source_files(resolved_sources_path)
+    # Stable source IDs come from deterministic discovery order so inventories
+    # can be compared across runs without unrelated ordering noise.
     records = [
         _build_record(
             source_id=f"SRC-{index:04d}", path=path, root=resolved_sources_path
@@ -127,7 +129,12 @@ def write_source_inventory_payload(
 
 
 def _discover_source_files(sources_path: Path) -> list[Path]:
-    """Return source files in deterministic order while ignoring tool caches."""
+    """Return source files in deterministic order while ignoring tool caches.
+
+    Deterministic ordering is useful because source IDs flow into evidence IDs
+    and later citations. Hidden/tool directories are ignored to avoid treating
+    repository machinery as project evidence.
+    """
 
     if sources_path.is_file():
         return [sources_path]
@@ -170,6 +177,8 @@ def _build_record(source_id: str, path: Path, root: Path) -> dict[str, Any]:
     }
 
     if extension not in SUPPORTED_EXTENSIONS:
+        # Unsupported files are skipped inventory records, not project failures.
+        # They stay visible in the inventory but never become evidence chunks.
         record.update(
             {
                 "status": "skipped",
@@ -203,6 +212,8 @@ def _build_record(source_id: str, path: Path, root: Path) -> dict[str, Any]:
 
 
 def _load_plain_text(record: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Record basic text metadata and a bounded preview, not source meaning."""
+
     text = path.read_text(encoding="utf-8")
     record.update(
         {
@@ -216,6 +227,8 @@ def _load_plain_text(record: dict[str, Any], path: Path) -> dict[str, Any]:
 
 
 def _load_json(record: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Record JSON shape metadata without interpreting the values."""
+
     text = path.read_text(encoding="utf-8")
     try:
         parsed = json.loads(text)
@@ -232,6 +245,8 @@ def _load_json(record: dict[str, Any], path: Path) -> dict[str, Any]:
         }
     )
     if isinstance(parsed, dict):
+        # Top-level keys describe shape only. They are not claims about what the
+        # JSON proves, and the list is bounded for artifact readability.
         record["json_top_level_keys"] = sorted(str(key) for key in parsed)[
             :MAX_RECORDED_KEYS
         ]
@@ -239,6 +254,8 @@ def _load_json(record: dict[str, Any], path: Path) -> dict[str, Any]:
 
 
 def _load_yaml(record: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Record YAML shape metadata using PyYAML or the tiny fallback."""
+
     text = path.read_text(encoding="utf-8")
     try:
         parsed = _safe_load_yaml(text)
@@ -264,7 +281,12 @@ def _load_yaml(record: dict[str, Any], path: Path) -> dict[str, Any]:
 
 
 def _safe_load_yaml(text: str) -> Any:
-    """Parse YAML with PyYAML, or a tiny fallback for offline test environments."""
+    """Parse YAML with PyYAML, or a tiny fallback for offline test environments.
+
+    The fallback handles only simple mappings/lists so basic tests can run when
+    PyYAML is absent. It is not intended to broaden YAML support or infer
+    project meaning.
+    """
 
     if YAML_MODULE is not None:
         try:
@@ -301,6 +323,8 @@ def _safe_load_yaml(text: str) -> Any:
 
 
 def _parse_yaml_scalar(value: str) -> Any:
+    """Parse the few scalar forms supported by the minimal YAML fallback."""
+
     if value.lower() == "true":
         return True
     if value.lower() == "false":
@@ -309,6 +333,8 @@ def _parse_yaml_scalar(value: str) -> Any:
 
 
 def _load_csv(record: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Record CSV columns and row counts without judging data quality."""
+
     text = path.read_text(encoding="utf-8")
     rows = list(csv.reader(text.splitlines()))
     column_names = rows[0] if rows else []
@@ -328,6 +354,8 @@ def _load_csv(record: dict[str, Any], path: Path) -> dict[str, Any]:
 
 
 def _display_path(path: Path, root: Path) -> str:
+    """Store paths relative to the supplied root for portable artifacts."""
+
     if root.is_dir():
         return path.relative_to(root).as_posix()
     return path.name
@@ -358,6 +386,8 @@ def _line_count(text: str) -> int:
 
 
 def _bounded_preview(text: str) -> str:
+    """Return a short preview so inventory does not dump whole source files."""
+
     compact = text.strip()
     if len(compact) <= PREVIEW_CHARACTER_LIMIT:
         return compact

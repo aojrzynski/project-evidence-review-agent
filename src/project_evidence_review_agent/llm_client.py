@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 from typing import Protocol
 
+# A small default model keeps the example workflow practical; callers can
+# override it with --llm-model without changing validation boundaries.
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
 
 
@@ -20,7 +22,12 @@ class LLMConfigurationError(RuntimeError):
 
 
 class ReviewLLMClient(Protocol):
-    """Protocol implemented by real and fake review clients."""
+    """Protocol implemented by real and fake review clients.
+
+    The workflow depends on this protocol rather than a concrete OpenAI class so
+    tests can inject deterministic fake clients and validation can be exercised
+    without network access.
+    """
 
     def review_claims(self, prompt: str, *, model: str) -> str:
         """Return model text for a bounded claim-review prompt."""
@@ -39,11 +46,15 @@ class OpenAIReviewClient:
 
     def __init__(self) -> None:
         if not os.environ.get("OPENAI_API_KEY"):
+            # Check configuration explicitly so users get a deterministic-mode
+            # hint instead of a low-level client error.
             raise LLMConfigurationError(
                 "OPENAI_API_KEY is not set. Install/configure the optional LLM "
                 "client, or rerun with --no-llm for deterministic evidence-pack mode."
             )
         try:
+            # Keep the import local so package import, tests, and --no-llm runs
+            # do not require the optional OpenAI dependency.
             from openai import OpenAI
         except ImportError as exc:
             raise LLMConfigurationError(
@@ -64,6 +75,12 @@ class OpenAIReviewClient:
         return self._create_response(prompt, model=model)
 
     def _create_response(self, prompt: str, *, model: str) -> str:
+        """Send plain prompt text and return raw model text for validation.
+
+        The request intentionally uses no web tools, file uploads, function
+        calling, or streaming; downstream validators own structure and safety.
+        """
+
         response = self._client.responses.create(model=model, input=prompt)
         output_text = getattr(response, "output_text", None)
         if isinstance(output_text, str):

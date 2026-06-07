@@ -84,7 +84,11 @@ class FollowUpAnalysisResult:
 def build_follow_up_analysis_prompt(
     *, llm_context: dict[str, Any], claim_review: dict[str, Any]
 ) -> str:
-    """Build one strict bounded prompt for missing evidence and contradictions."""
+    """Build one strict bounded prompt for gap and contradiction signals.
+
+    The prompt reuses selected evidence and validated claim review only. It does
+    not authorize external searching, raw-source access, or final findings.
+    """
 
     allowed_claim_ids = _allowed_claim_ids(claim_review)
     schema = {
@@ -172,8 +176,12 @@ def run_follow_up_analysis(
     ]
     allowed_claim_ids = _allowed_claim_ids(claim_review)
     try:
+        # One bounded follow-up call asks for both kinds of review support so the
+        # same evidence and validated claim IDs govern both outputs.
         raw_response = client.review_follow_up_analysis(prompt, model=model)
     except Exception as exc:  # noqa: BLE001 - convert client failures to clean artifacts
+        # Client failures become failed artifacts for both follow-up outputs; a
+        # missing file would make trace inspection harder.
         message = f"LLM follow-up analysis failed: {exc}"
         missing_payload = build_missing_evidence_artifact(
             question=question,
@@ -201,6 +209,8 @@ def run_follow_up_analysis(
 
     parsed, parse_messages = parse_llm_response(raw_response)
     if parsed is None:
+        # Malformed output cannot safely produce either artifact because both
+        # depend on the same top-level JSON response.
         rejected = [
             {"reason": "malformed_json", "raw_response_preview": _preview(raw_response)}
         ]
@@ -229,6 +239,8 @@ def run_follow_up_analysis(
         return _write_result(output_dir, missing_payload, contradiction_payload)
 
     top_messages = _validate_top_level(parsed)
+    # Validation remains deterministic and separate from the model call. Unsafe
+    # or malformed items are rejected rather than repaired into findings.
     missing_items, rejected_missing, missing_messages = validate_missing_evidence(
         parsed.get("missing_evidence"),
         allowed_evidence_ids=allowed_evidence_ids,
@@ -273,6 +285,8 @@ def run_follow_up_analysis(
 
 
 def _validate_top_level(parsed: dict[str, Any]) -> list[str]:
+    """Check that the combined response contains both expected sections."""
+
     messages: list[str] = []
     for field in ("missing_evidence", "contradiction_candidates"):
         if field not in parsed:
@@ -281,6 +295,8 @@ def _validate_top_level(parsed: dict[str, Any]) -> list[str]:
 
 
 def _allowed_claim_ids(claim_review: dict[str, Any]) -> list[str]:
+    """Extract validated claim IDs that follow-up output may reference."""
+
     claims = claim_review.get("claims", [])
     if not isinstance(claims, list):
         return []
@@ -296,6 +312,8 @@ def _write_result(
     missing_payload: dict[str, Any],
     contradiction_payload: dict[str, Any],
 ) -> FollowUpAnalysisResult:
+    """Write both follow-up artifacts and return their trace-facing summary."""
+
     missing_path = write_missing_evidence_artifact(output_dir, missing_payload)
     contradiction_path = write_contradiction_artifact(output_dir, contradiction_payload)
     return FollowUpAnalysisResult(

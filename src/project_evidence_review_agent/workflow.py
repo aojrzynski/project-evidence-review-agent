@@ -1,11 +1,15 @@
-"""Shared workflow stages for project evidence review orchestration.
+"""Shared workflow spine for project evidence review orchestration.
 
-This module is the orchestration seam for PR #9. It deliberately keeps product
-logic in the existing modules: source inventory owns local source loading,
-evidence indexing owns chunk semantics, retrieval owns deterministic selection,
-claim/follow-up modules own LLM validation, and project reporting owns final
-Markdown assembly. The standard runner calls the stages directly; the optional
-LangGraph adapter wraps the same stage functions as graph nodes.
+This module defines the stage sequence that both the standard runner and the
+optional LangGraph adapter use. Product logic stays in focused modules: source
+inventory owns local source loading, evidence indexing owns chunk semantics,
+retrieval owns deterministic selection, claim/follow-up modules own bounded LLM
+validation, and project reporting owns deterministic Markdown assembly.
+
+The sequence mirrors the artifact chain: inventory, index, recorded question,
+retrieval outputs, optional LLM context/review/follow-up, report, and trace. The
+stages record operational status and artifacts; they do not decide whether a
+project is ready, approved, compliant, certified, or safe to launch.
 """
 
 from __future__ import annotations
@@ -43,7 +47,12 @@ from project_evidence_review_agent.workflow_state import WorkflowConfig, Workflo
 
 
 class WorkflowLLMConfigurationError(Exception):
-    """Raised after trace-safe status fields are set for missing LLM config."""
+    """Raised after trace-safe status fields are set for missing LLM config.
+
+    Wrapping the lower-level client error lets the CLI print a user-friendly
+    message while preserving workflow statuses that explain which LLM-backed
+    stages were skipped or failed.
+    """
 
     def __init__(self, original: LLMConfigurationError) -> None:
         self.original = original
@@ -66,21 +75,30 @@ def run_standard_workflow(
     prepare_output(config, result)
     try:
         if config.sources_path is not None:
+            # The deterministic front half builds the evidence boundary before
+            # any optional model call can occur. Each artifact feeds the next.
             inventory_sources(config, result)
             build_evidence_index_stage(config, result)
             record_review_question(config, result)
             retrieve_evidence(config, result)
             write_evidence_pack_markdown_stage(config, result)
             if config.no_llm:
+                # --no-llm intentionally stops after selected evidence so users
+                # can review evidence_pack.json/md without optional dependencies.
                 mark_no_llm_skips(result)
             else:
                 build_llm_context(config, result)
                 run_claim_review_stage(config, result, review_client)
                 if result.claim_review_validation_status == "passed":
+                    # Follow-up analysis depends on validated claim IDs and
+                    # evidence IDs. A failed claim review would leave no safe
+                    # structure for gap or contradiction checks to reference.
                     run_followup_analysis_stage(config, result, review_client)
                     if followup_passed(result):
                         write_project_report_stage(config, result)
                     else:
+                        # The report is assembled only from validated inputs;
+                        # failed follow-up artifacts remain available separately.
                         result.project_evidence_report_status = (
                             "skipped_followup_failed"
                         )
@@ -88,6 +106,8 @@ def run_standard_workflow(
                     mark_claim_review_failure_skips(result)
         return result
     finally:
+        # The trace is operational status, so write it even when an LLM
+        # configuration or validation path prevents later review artifacts.
         write_trace_stage(config, result)
 
 
@@ -98,7 +118,11 @@ def prepare_output(config: WorkflowConfig, _result: WorkflowResult) -> None:
 
 
 def inventory_sources(config: WorkflowConfig, result: WorkflowResult) -> None:
-    """Inventory local sources using the existing source inventory module."""
+    """Inventory local sources before chunking or interpretation.
+
+    The result records what local files were considered and what was skipped. It
+    does not say whether a file proves any claim.
+    """
 
     if config.sources_path is None:
         return
@@ -144,7 +168,12 @@ def record_review_question(config: WorkflowConfig, result: WorkflowResult) -> No
 
 
 def retrieve_evidence(config: WorkflowConfig, result: WorkflowResult) -> None:
-    """Run deterministic lexical retrieval without adding interpretation."""
+    """Run deterministic lexical retrieval without adding interpretation.
+
+    A selected chunk is lexically relevant to the question, not automatically
+    supportive, contradictory, true, or complete. ``max_chunks`` bounds the
+    evidence pack that later stages may see.
+    """
 
     if result.evidence_index is None:
         return
@@ -253,7 +282,12 @@ def run_claim_review_stage(
 
 
 def mark_claim_review_failure_skips(result: WorkflowResult) -> None:
-    """Skip downstream stages after claim review failure or failed validation."""
+    """Skip downstream stages after claim review failure or failed validation.
+
+    Follow-up analysis and report assembly require validated claim-review
+    structure. Skipping is safer than building later artifacts on malformed or
+    unsafe model output.
+    """
 
     result.missing_evidence_status = "skipped_claim_review_failed"
     result.contradiction_detection_status = "skipped_claim_review_failed"
@@ -309,7 +343,12 @@ def followup_passed(result: WorkflowResult) -> bool:
 
 
 def write_project_report_stage(config: WorkflowConfig, result: WorkflowResult) -> None:
-    """Assemble the final deterministic report from validated artifacts only."""
+    """Assemble the final deterministic report from validated artifacts only.
+
+    Report assembly does not call the LLM again and does not upgrade review
+    material into approval. It preserves the separate meanings of claims, gap
+    signals, and contradiction candidates.
+    """
 
     if (
         result.evidence_pack_payload is None
@@ -409,7 +448,11 @@ def write_trace_stage(config: WorkflowConfig, result: WorkflowResult) -> None:
 
 
 def workflow_exit_code(config: WorkflowConfig, result: WorkflowResult) -> int:
-    """Map validation and LLM failure statuses to the legacy CLI exit code."""
+    """Map validation and LLM failure statuses to the CLI exit code.
+
+    The exit code describes whether the requested run completed safely. It is
+    not a project-readiness verdict.
+    """
 
     if (
         config.sources_path is not None

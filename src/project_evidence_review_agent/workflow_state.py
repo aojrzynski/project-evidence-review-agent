@@ -27,6 +27,8 @@ class WorkflowConfig:
     their artifacts are written.
     """
 
+    # User/run configuration. These values come from the CLI and are shared by
+    # standard and graph orchestration without changing stage semantics.
     question: str
     output_dir: Path
     sources_path: Path | None = None
@@ -46,6 +48,8 @@ class WorkflowResult:
     graph nodes must not reinterpret or rewrite them.
     """
 
+    # Operational status and counts. These fields explain what happened during
+    # the run; they are not evidence conclusions or approval decisions.
     source_inventory_written: bool = False
     evidence_index_written: bool = False
     review_question_written: bool = False
@@ -92,6 +96,9 @@ class WorkflowResult:
     langgraph_available: bool | None = None
     graph_node_statuses: dict[str, str] = field(default_factory=dict)
 
+    # In-memory payload hand-offs between stages. They let both orchestrators
+    # share the same business modules without re-reading or reinterpreting
+    # artifacts inside graph nodes.
     inventory: Any = None
     evidence_index: dict[str, Any] | None = None
     evidence_pack_payload: dict[str, Any] | None = None

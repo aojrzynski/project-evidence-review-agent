@@ -65,6 +65,9 @@ def run_langgraph_workflow(
     """
 
     try:
+        # Import LangGraph only when requested so normal installs and --no-llm
+        # deterministic runs do not need the optional graph dependency. This
+        # local graph runs in process; no LangSmith or cloud service is required.
         from langgraph.graph import END, StateGraph
     except ImportError as exc:
         raise LangGraphUnavailableError(LANGGRAPH_INSTALL_MESSAGE) from exc
@@ -84,6 +87,12 @@ def run_langgraph_workflow(
     )
 
     def node(name: str, func: Any) -> Any:
+        """Wrap a shared workflow stage as a status-recording graph node.
+
+        The wrapper records graph execution status only. It does not reinterpret
+        artifacts or add LangGraph-specific evidence/review rules.
+        """
+
         def wrapped(state: _GraphState) -> _GraphState:
             state["result"].graph_node_statuses[name] = "running"
             func(state["config"], state["result"])
@@ -93,6 +102,8 @@ def run_langgraph_workflow(
         return wrapped
 
     def run_claim_node(state: _GraphState) -> _GraphState:
+        """Run the shared claim-review stage and preserve failure semantics."""
+
         name = "run_claim_review"
         state["result"].graph_node_statuses[name] = "running"
         try:
@@ -106,6 +117,8 @@ def run_langgraph_workflow(
         return state
 
     def run_followup_node(state: _GraphState) -> _GraphState:
+        """Run shared follow-up analysis after claim validation passes."""
+
         name = "run_followup_analysis"
         state["result"].graph_node_statuses[name] = "running"
         run_followup_analysis_stage(
@@ -115,6 +128,8 @@ def run_langgraph_workflow(
         return state
 
     def no_llm_node(state: _GraphState) -> _GraphState:
+        """Record the intentional deterministic branch with no LLM review."""
+
         name = "mark_no_llm_skips"
         state["result"].graph_node_statuses[name] = "running"
         mark_no_llm_skips(state["result"])
@@ -122,6 +137,8 @@ def run_langgraph_workflow(
         return state
 
     def claim_failed_node(state: _GraphState) -> _GraphState:
+        """Mirror the standard workflow branch after claim-review failure."""
+
         name = "mark_claim_review_failure_skips"
         state["result"].graph_node_statuses[name] = "running"
         mark_claim_review_failure_skips(state["result"])
@@ -129,6 +146,8 @@ def run_langgraph_workflow(
         return state
 
     def report_skipped_node(state: _GraphState) -> _GraphState:
+        """Skip report assembly when follow-up artifacts failed validation."""
+
         name = "mark_followup_report_skipped"
         state["result"].graph_node_statuses[name] = "running"
         state["result"].project_evidence_report_status = "skipped_followup_failed"
@@ -136,6 +155,8 @@ def run_langgraph_workflow(
         return state
 
     def write_trace_node(state: _GraphState) -> _GraphState:
+        """Write the same operational trace as standard orchestration."""
+
         name = "write_trace"
         state["result"].graph_node_statuses[name] = "running"
         state["result"].graph_orchestration_status = "completed"
@@ -144,25 +165,35 @@ def run_langgraph_workflow(
         return state
 
     def route_after_prepare(state: _GraphState) -> str:
+        """Route no-source runs directly to trace, as the standard runner does."""
+
         if state["config"].sources_path is None:
             return "write_trace"
         return "inventory_sources"
 
     def route_after_markdown(state: _GraphState) -> str:
+        """Choose deterministic evidence-pack mode or bounded LLM context."""
+
         if state["config"].no_llm:
             return "mark_no_llm_skips"
         return "build_llm_context"
 
     def route_after_claim_review(state: _GraphState) -> str:
+        """Allow follow-up only when claim review passed validation."""
+
         if state["result"].claim_review_validation_status == "passed":
             return "run_followup_analysis"
         return "mark_claim_review_failure_skips"
 
     def route_after_followup(state: _GraphState) -> str:
+        """Assemble the report only from validated follow-up artifacts."""
+
         if followup_passed(state["result"]):
             return "write_project_report"
         return "mark_followup_report_skipped"
 
+    # The graph topology mirrors the standard workflow branches. LangGraph changes
+    # orchestration mechanics only, not evidence boundaries or review meaning.
     workflow = StateGraph(_GraphState)
     workflow.add_node("prepare_output", node("prepare_output", prepare_output))
     workflow.add_node("inventory_sources", node("inventory_sources", inventory_sources))

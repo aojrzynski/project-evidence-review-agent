@@ -102,8 +102,15 @@ def build_trace(
     graph_orchestration_status: str = "not_used",
     graph_node_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Build the JSON-serializable trace payload for a retrieval run."""
+    """Build concise operational status for a workflow run.
 
+    The trace records which artifacts were written, which stages were skipped or
+    failed, and which orchestrator ran. Counts and statuses support run
+    inspection; they are not project conclusions.
+    """
+
+    # Derived statuses keep the trace readable without changing artifact schemas
+    # or introducing review conclusions.
     retrieval_status = "completed" if retrieval_trace_written else "not_performed"
     evidence_pack_status = "completed" if evidence_pack_written else "not_performed"
     evidence_pack_markdown_status = (
@@ -199,6 +206,8 @@ def build_trace(
         "report_missing_evidence_count": report_missing_evidence_count,
         "report_contradiction_candidate_count": report_contradiction_candidate_count,
         "report_human_check_count": report_human_check_count,
+        # These explicit false/not_performed fields preserve the no-approval and
+        # no-go-live boundary even when a final report was assembled.
         "final_report_is_not_approval": final_report_is_not_approval,
         "final_project_evidence_report_written": project_evidence_report_written,
         "approval_or_go_live_decision_written": False,
@@ -267,7 +276,10 @@ def write_trace(
     graph_orchestration_status: str = "not_used",
     graph_node_statuses: dict[str, str] | None = None,
 ) -> Path:
-    """Write the trace artifact and return its path."""
+    """Write the trace artifact and return its path.
+
+    The trace is operational metadata, not another evidence-review artifact.
+    """
 
     output_dir.mkdir(parents=True, exist_ok=True)
     trace_path = output_dir / TRACE_FILE_NAME
@@ -343,6 +355,8 @@ def _workflow_status(
     contradiction_validation_status: str = "not_performed",
     project_evidence_report_status: str = "not_requested_or_not_applicable",
 ) -> str:
+    """Summarize run progress without deciding project readiness."""
+
     if project_evidence_report_status == "written":
         return "project_evidence_report_written"
     if (
