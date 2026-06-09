@@ -8,6 +8,15 @@ Projects leave evidence scattered across notes, requirements, decision logs, ris
 
 In full mode, an LLM helps interpret only the selected evidence. The tool still does not make the final decision.
 
+> [!NOTE]
+> **Part of the Data Agent Suite.**
+> 
+> This repo is one of 10 local-first data/AI agents built around practical data workflows, deterministic evidence, bounded LLM use, and review-ready artifacts.
+> 
+> The full ordered list of agents is included near the bottom of this README.
+> 
+> See the full suite overview: [Data Agent Suite](https://aojrzynski.github.io/agents/)
+
 ## The workplace problem
 
 Project evidence is often spread across many files.
@@ -309,3 +318,22 @@ The tests do not call a real LLM and do not require `OPENAI_API_KEY`.
 - [LLM review](docs/llm_review.md)
 - [Orchestration](docs/orchestration.md)
 - [Roadmap](docs/roadmap.md)
+
+---
+
+> [!NOTE]
+> **Data Agent Suite**  
+> This repo is part of the **Data Agent Suite**: 10 local-first data/AI agents focused on practical data workflows, deterministic evidence, bounded LLM use, and review-ready artifacts.
+> 
+> See the full suite overview: [Data Agent Suite](https://aojrzynski.github.io/agents/)
+>
+> 1. [Data Quality Triage Agent](https://github.com/aojrzynski/data-quality-triage-agent)
+> 2. [Data Reconciliation Agent](https://github.com/aojrzynski/data-reconciliation-agent)
+> 3. [Data Dictionary Agent](https://github.com/aojrzynski/data-dictionary-agent)
+> 4. [Data Contract Review Agent](https://github.com/aojrzynski/data-contract-review-agent)
+> 5. [Sensitive Field Review Agent](https://github.com/aojrzynski/sensitive-field-review-agent)
+> 6. [Data Test Suggestion Agent](https://github.com/aojrzynski/data-test-suggestion-agent)
+> 7. [Dataset Onboarding Reviewer Workflow](https://github.com/aojrzynski/dataset-onboarding-reviewer-workflow)
+> 8. [Data Quality Investigation Workflow](https://github.com/aojrzynski/data-quality-investigation-workflow)
+> 9. **Project Evidence Review Agent**
+> 10. [Data Migration Readiness Review Agent](https://github.com/aojrzynski/data-migration-readiness-review-agent)
